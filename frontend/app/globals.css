@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #009C8A;
+  --color-primary-dark: #007A6C;
+  --color-primary-light: #E6F7F5;
+
+  --color-navy: #1B3468;
+  --color-navy-dark: #132552;
+  --color-navy-light: #EEF1F8;
+
+  --color-white: #FFFFFF;
+  --color-background: #F8FAFB;
+  --color-surface: #FFFFFF;
+  --color-border: #E2E8F0;
+  
+  --color-text-primary: #1A2E44;
+  --color-text-secondary: #4A6580;
+  --color-text-muted: #94A3B8;
+
+  --color-success: #2E9E6B;
+  --color-success-light: #E8F5EE;
+  
+  --color-warning: #D97706;
+  --color-warning-light: #FEF3C7;
+  
+  --color-error: #DC2626;
+  --color-error-light: #FEE2E2;
+  
+  --color-info: #2563EB;
+  --color-info-light: #EFF6FF;
+
+  --color-agent-thinking: #7C3AED;
+  --color-agent-light: #F3EFFE;
+
+  --font-family-base: 'Inter', system-ui, sans-serif;
+  --font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+  --text-4xl: 2.25rem;
+  
+  --font-normal: 400;
+  --font-medium: 500;
+  --font-semibold: 600;
+  --font-bold: 700;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-base);
+}

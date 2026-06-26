@@ -1,0 +1,35 @@
+{
+  "nav": {
+    "newChat": "Nueva conversación",
+    "history": "Historial",
+    "admin": "Administración",
+    "logout": "Cerrar sesión"
+  },
+  "chat": {
+    "placeholder": "Escribe tu pregunta...",
+    "sendButton": "Enviar",
+    "voiceButton": "Hablar",
+    "selectDocuments": "Seleccionar documentos",
+    "agentThinking": "El agente está pensando...",
+    "sources": "Fuentes",
+    "webSources": "Fuentes externas"
+  },
+  "approval": {
+    "title": "Revisión requerida",
+    "preview": "Vista previa del documento",
+    "approve": "Aprobar y guardar en Drive",
+    "reject": "Rechazar",
+    "comment": "Comentario (opcional)"
+  },
+  "documents": {
+    "picker": "Seleccionar de Google Drive",
+    "search": "Buscar documentos...",
+    "maxSelected": "Máximo 5 documentos seleccionados",
+    "selected": "{count} documento(s) seleccionado(s)"
+  },
+  "errors": {
+    "networkError": "Error de conexión. Por favor verifica tu conexión a internet.",
+    "sessionExpired": "Tu sesión ha expirado. Inicia sesión nuevamente.",
+    "permissionDenied": "No tienes permisos para esta acción."
+  }
+}

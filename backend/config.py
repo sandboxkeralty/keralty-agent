@@ -1,0 +1,63 @@
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional
+
+class Settings(BaseSettings):
+    GOOGLE_CLOUD_PROJECT: str = "keralty-agent-dev"
+    GOOGLE_CLOUD_REGION: str = "us-central1"
+    GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
+
+    USE_VERTEX_AI: bool = False
+    GOOGLE_API_KEY: Optional[str] = None
+    GEMINI_FLASH_MODEL: str = "gemini-2.5-flash"
+    GEMINI_PRO_MODEL: str = "gemini-2.5-pro"
+    GEMINI_LIVE_MODEL: str = "gemini-live-2.5-flash-native-audio"
+    IMAGEN_MODEL: str = "imagen-3.0-generate-001"
+
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/auth/callback"
+
+    USE_IAP: bool = False
+    USE_AGENT_ENGINE: bool = False
+    USE_RAG_ENGINE: bool = False
+    USE_LIVEKIT: bool = False
+    SEARCH_GROUNDING_ENABLED: bool = False
+    VOICE_ENABLED: bool = True
+    SLIDES_ENABLED: bool = True
+    IMAGE_GEN_ENABLED: bool = True
+    ADMIN_PANEL_ENABLED: bool = False
+
+    FIRESTORE_DATABASE: str = "(default)"
+    GCS_BUCKET: str = "keralty-agent-dev-artifacts"
+    
+    SECRET_KEY: str = "super-secret-key-replace-in-prod"
+    ALLOWED_ORIGINS: str = "http://localhost:3000"
+    ENVIRONMENT: str = "development"
+
+    LOG_LEVEL: str = "INFO"
+    OTEL_ENABLED: bool = False
+    OTEL_SERVICE_NAME: str = "keralty-agent-backend"
+    ERROR_REPORTING_ENABLED: bool = False
+
+    EMAIL_GMAIL_ENABLED: bool = True
+    EMAIL_GMAIL_SCOPES: str = "https://www.googleapis.com/auth/gmail.modify"
+    EMAIL_OUTLOOK_ENABLED: bool = False
+    AZURE_CLIENT_ID: Optional[str] = None
+    AZURE_CLIENT_SECRET: Optional[str] = None
+    AZURE_TENANT_ID: Optional[str] = None
+    AZURE_REDIRECT_URI: str = "http://localhost:8000/auth/outlook/callback"
+    EMAIL_SEND_ENABLED: bool = True
+    EMAIL_TRACKING_ENABLED: bool = True
+    EMAIL_TRACKING_FOLLOWUP_DAYS: int = 3
+    EMAIL_MAX_THREADS: int = 50
+    EMAIL_DIGEST_ENABLED: bool = True
+
+    KB_AGENT_ENABLED: bool = True
+    KB_RAG_CORPUS_ID: str = "keralty-kb-corpus-prod"
+    KB_GCS_BUCKET: str = "keralty-kb-documents"
+    KB_INDEX_ENDPOINT: Optional[str] = None
+    KB_MAX_RESULTS: int = 10
+
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+settings = Settings()
