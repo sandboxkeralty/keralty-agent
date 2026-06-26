@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import auth, documents, voice
+from routers import auth, documents, voice, history, admin, knowledge
 from config import settings
 from observability.tracing import setup_tracing
 
@@ -19,6 +19,9 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(documents.router)
 app.include_router(voice.router)
+app.include_router(history.router)
+app.include_router(admin.router)
+app.include_router(knowledge.router)
 
 @app.get("/health")
 def health_check():

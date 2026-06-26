@@ -1,0 +1,60 @@
+alertPolicies:
+  - displayName: "Costo diario supera umbral"
+    combiner: "OR"
+    conditions:
+      - displayName: "keralty/model/cost_usd > $15/día"
+        conditionThreshold:
+          filter: 'metric.type="custom.googleapis.com/keralty/model/cost_usd"'
+          comparison: "COMPARISON_GT"
+          thresholdValue: 15
+          duration: "86400s"
+    notificationChannels:
+      - "email-administrador"
+
+  - displayName: "Error rate alto"
+    combiner: "OR"
+    conditions:
+      - displayName: "keralty/agent/error_count > 15 en 5 min"
+        conditionThreshold:
+          filter: 'metric.type="custom.googleapis.com/keralty/agent/error_count"'
+          comparison: "COMPARISON_GT"
+          thresholdValue: 15
+          duration: "300s"
+    notificationChannels:
+      - "email-equipo-tecnico"
+
+  - displayName: "Latencia P99 alta"
+    combiner: "OR"
+    conditions:
+      - displayName: "keralty/agent/latency_ms P99 > 45s en 10 min"
+        conditionThreshold:
+          filter: 'metric.type="custom.googleapis.com/keralty/agent/latency_ms"'
+          comparison: "COMPARISON_GT"
+          thresholdValue: 45000
+          duration: "600s"
+    notificationChannels:
+      - "email-equipo-tecnico"
+
+  - displayName: "Rate limit Gemini API"
+    combiner: "OR"
+    conditions:
+      - displayName: "errores 429 > 5 en 1 min"
+        conditionThreshold:
+          filter: 'metric.type="custom.googleapis.com/keralty/api/status_429_count"'
+          comparison: "COMPARISON_GT"
+          thresholdValue: 5
+          duration: "60s"
+    notificationChannels:
+      - "email-equipo-tecnico"
+
+  - displayName: "Aprobaciones acumuladas"
+    combiner: "OR"
+    conditions:
+      - displayName: "keralty/approval/pending > 30"
+        conditionThreshold:
+          filter: 'metric.type="custom.googleapis.com/keralty/approval/pending"'
+          comparison: "COMPARISON_GT"
+          thresholdValue: 30
+          duration: "3600s"
+    notificationChannels:
+      - "email-administrador-funcional"

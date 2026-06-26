@@ -1,0 +1,60 @@
+{
+  "displayName": "Keralty Agent Dashboard",
+  "gridLayout": {
+    "columns": "2",
+    "widgets": [
+      {
+        "title": "Agent Token Usage",
+        "xyChart": {
+          "dataSets": [
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"custom.googleapis.com/keralty/agent/tokens\" resource.type=\"global\""
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "title": "Agent Latency P99",
+        "xyChart": {
+          "dataSets": [
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"custom.googleapis.com/keralty/agent/latency_ms\" resource.type=\"global\""
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "title": "Cloud Run Errors",
+        "xyChart": {
+          "dataSets": [
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"run.googleapis.com/request_count\" resource.type=\"cloud_run_revision\" metric.labels.response_code_class=\"5xx\""
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "title": "Pending Approvals",
+        "scorecard": {
+          "timeSeriesQuery": {
+            "timeSeriesFilter": {
+              "filter": "metric.type=\"custom.googleapis.com/keralty/approval/pending\" resource.type=\"global\""
+            }
+          }
+        }
+      }
+    ]
+  }
+}
