@@ -1,9 +1,12 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import auth
+from routers import auth, documents, voice
 from config import settings
+from observability.tracing import setup_tracing
 
 app = FastAPI(title="Keralty Agent API")
+
+setup_tracing(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -14,6 +17,8 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(documents.router)
+app.include_router(voice.router)
 
 @app.get("/health")
 def health_check():
