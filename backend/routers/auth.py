@@ -2,7 +2,7 @@ from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import RedirectResponse
 from jose import jwt as jose_jwt
-from auth.google_oauth import get_authorization_url, get_flow, get_user_info, credentials_to_dict
+from auth.google_oauth import get_authorization_url, consume_flow, get_user_info, credentials_to_dict
 from services.firestore import FirestoreService
 from config import settings
 
@@ -15,7 +15,7 @@ async def login():
 
 @router.get("/callback")
 async def callback(request: Request, code: str, state: str = None):
-    flow = get_flow()
+    flow = consume_flow(state)  # reuses the same Flow that has the PKCE code_verifier
     flow.redirect_uri = settings.GOOGLE_REDIRECT_URI
     try:
         flow.fetch_token(code=code)

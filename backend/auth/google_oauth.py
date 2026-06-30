@@ -1,5 +1,10 @@
 import google_auth_oauthlib.flow
+from typing import Dict
 from config import settings
+
+# Keyed by OAuth state; holds the Flow that carries the PKCE code_verifier.
+# Cleared on consumption so each state is single-use.
+_flow_cache: Dict[str, google_auth_oauthlib.flow.Flow] = {}
 
 SCOPES = [
     "openid",
@@ -33,7 +38,13 @@ def get_authorization_url():
         include_granted_scopes="true",
         prompt="consent"
     )
+    _flow_cache[state] = flow  # preserve code_verifier for the callback
     return auth_url, state
+
+
+def consume_flow(state: str) -> google_auth_oauthlib.flow.Flow:
+    """Return the flow that has the PKCE verifier for this state, or a fresh one."""
+    return _flow_cache.pop(state, None) or get_flow()
 
 
 def get_user_info(credentials) -> dict:
