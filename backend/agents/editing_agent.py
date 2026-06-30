@@ -1,6 +1,7 @@
 from google.adk.agents import Agent
 from tools.docs_tools import docs_get, docs_update
 from tools.approval_tools import approval_create
+from tools.sheets_tools import update_spreadsheet_values, read_spreadsheet_range
 
 INSTRUCTION = """
 # IDENTIDAD Y ROL
@@ -31,5 +32,5 @@ editing_agent = Agent(
     model="gemini-2.5-flash",
     instruction=INSTRUCTION,
     description="Edits existing Google Docs with user approval.",
-    tools=[docs_get, docs_update, approval_create]
+    tools=[docs_get, docs_update, approval_create, update_spreadsheet_values, read_spreadsheet_range]
 )

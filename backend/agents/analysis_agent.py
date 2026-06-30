@@ -1,6 +1,7 @@
 from google.adk.agents import Agent
 from tools.drive_tools import drive_read
 from tools.rag_tools import context_inject, rag_retrieve
+from tools.sheets_tools import read_spreadsheet_range
 
 INSTRUCTION = """
 # IDENTIDAD Y ROL
@@ -34,5 +35,5 @@ analysis_agent = Agent(
     model="gemini-2.5-pro",
     instruction=INSTRUCTION,
     description="Analyzes internal documents to answer questions, generate summaries, and extract structured data.",
-    tools=[drive_read, context_inject, rag_retrieve]
+    tools=[drive_read, context_inject, rag_retrieve, read_spreadsheet_range]
 )

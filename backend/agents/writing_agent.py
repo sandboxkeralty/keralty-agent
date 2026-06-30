@@ -1,6 +1,8 @@
 from google.adk.agents import Agent
 from tools.drive_tools import drive_read
 from tools.rag_tools import context_inject
+from tools.sheets_tools import create_spreadsheet
+from tools.docs_tools import docs_create
 
 INSTRUCTION = """
 # IDENTIDAD Y ROL
@@ -35,5 +37,5 @@ writing_agent = Agent(
     model="gemini-2.5-pro",
     instruction=INSTRUCTION,
     description="Drafts markdown documents for executive summary and proposals.",
-    tools=[drive_read, context_inject]
+    tools=[drive_read, context_inject, create_spreadsheet, docs_create]
 )

@@ -52,3 +52,21 @@ class FirestoreService:
     @staticmethod
     def log_audit_event(event: AuditEvent):
         db.collection("audit_events").document(event.event_id).set(event.model_dump())
+
+    @staticmethod
+    def create_task(task_id: str, payload: dict):
+        db.collection("tasks").document(task_id).set(payload)
+
+    @staticmethod
+    def get_task(task_id: str) -> Optional[dict]:
+        doc = db.collection("tasks").document(task_id).get()
+        return doc.to_dict() if doc.exists else None
+
+    @staticmethod
+    def update_task(task_id: str, updates: dict):
+        db.collection("tasks").document(task_id).update(updates)
+
+    @staticmethod
+    def get_pending_tasks(user_id: str) -> List[dict]:
+        docs = db.collection("tasks").where("user_id", "==", user_id).where("status", "==", "pending").stream()
+        return [{"task_id": doc.id, **doc.to_dict()} for doc in docs]

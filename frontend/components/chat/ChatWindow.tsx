@@ -45,7 +45,10 @@ export function ChatWindow() {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
       const response = await fetch(`${apiUrl}/api/chat`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer test-token'
+        },
         body: JSON.stringify({ message: userMessage.content })
       });
 

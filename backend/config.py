@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 class Settings(BaseSettings):
-    GOOGLE_CLOUD_PROJECT: str = "keralty-agent-dev"
+    GOOGLE_CLOUD_PROJECT: str = "keraltysandbox"
     GOOGLE_CLOUD_REGION: str = "us-central1"
     GOOGLE_APPLICATION_CREDENTIALS: Optional[str] = None
 
