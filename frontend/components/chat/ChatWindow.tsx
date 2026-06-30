@@ -43,13 +43,19 @@ export function ChatWindow() {
 
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const token = localStorage.getItem('keralty_token') || 'test-token';
+      const sessionId = (() => {
+        let sid = sessionStorage.getItem('keralty_session');
+        if (!sid) { sid = crypto.randomUUID(); sessionStorage.setItem('keralty_session', sid); }
+        return sid;
+      })();
       const response = await fetch(`${apiUrl}/api/chat`, {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer test-token'
+          'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ message: userMessage.content })
+        body: JSON.stringify({ message: userMessage.content, session_id: sessionId }),
       });
 
       if (!response.body) throw new Error('No readable stream');

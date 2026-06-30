@@ -70,3 +70,22 @@ class FirestoreService:
     def get_pending_tasks(user_id: str) -> List[dict]:
         docs = db.collection("tasks").where("user_id", "==", user_id).where("status", "==", "pending").stream()
         return [{"task_id": doc.id, **doc.to_dict()} for doc in docs]
+
+    @staticmethod
+    def store_user_credentials(user_id: str, user_info: dict, creds_dict: dict):
+        from datetime import timezone
+        db.collection("users").document(user_id).set({
+            "user_id": user_id,
+            "email": user_info.get("email"),
+            "name": user_info.get("name"),
+            "picture": user_info.get("picture"),
+            "google_credentials": creds_dict,
+            "updated_at": datetime.now(timezone.utc),
+        }, merge=True)
+
+    @staticmethod
+    def get_user_credentials(user_id: str) -> Optional[dict]:
+        doc = db.collection("users").document(user_id).get()
+        if doc.exists:
+            return doc.to_dict().get("google_credentials")
+        return None
