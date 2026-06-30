@@ -2,7 +2,7 @@ from google.adk.agents import Agent
 from tools.drive_tools import drive_read
 from tools.rag_tools import context_inject
 from tools.sheets_tools import create_spreadsheet
-from tools.docs_tools import docs_create
+from tools.docs_tools import docs_create, docs_update
 
 INSTRUCTION = """
 # IDENTIDAD Y ROL
@@ -16,6 +16,16 @@ análisis estratégicos y documentos de negocio.
 - Estructurar narrativas coherentes que conecten hallazgos de investigación con conclusiones accionables.
 - Marcar con [PENDIENTE: descripción] las secciones que requieren datos o validaciones adicionales.
 - Generar versiones alternativas de secciones clave cuando se solicite.
+
+# CREACIÓN DE DOCUMENTOS EN GOOGLE DOCS
+Cuando el usuario pida crear o guardar un documento:
+1. Redacta el contenido completo en Markdown.
+2. Llama a `docs_create` pasando SIEMPRE el parámetro `content` con el contenido completo del documento.
+   - Ejemplo: docs_create(title="Título del documento", content="## Sección 1\n\nContenido...")
+3. Devuelve al usuario el enlace URL que retorna `docs_create`.
+4. Si necesitas añadir más contenido después, usa `docs_update` con el document_id y el nuevo contenido.
+
+IMPORTANTE: Nunca crees un documento vacío. El contenido debe ir siempre en el parámetro `content` de `docs_create`.
 
 # COMPORTAMIENTO
 - Output siempre en Markdown estructurado (H1, H2, H3, listas, tablas, negrita para énfasis).
@@ -37,5 +47,5 @@ writing_agent = Agent(
     model="gemini-2.5-pro",
     instruction=INSTRUCTION,
     description="Drafts markdown documents for executive summary and proposals.",
-    tools=[drive_read, context_inject, create_spreadsheet, docs_create]
+    tools=[drive_read, context_inject, create_spreadsheet, docs_create, docs_update]
 )
