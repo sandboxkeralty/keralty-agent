@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { MessageSquare, Clock, Settings, Mail, Plus, Trash2, Loader2 } from "lucide-react";
+import { MessageSquare, Settings, Mail, Plus, Trash2, Loader2 } from "lucide-react";
 import { useChatSession, ChatMessage } from "@/hooks/useChatSession";
 
 interface SessionSummary {
@@ -138,10 +138,6 @@ export function Sidebar() {
         <Link href="/email" className="flex items-center gap-3 rounded-[8px] px-3 py-2 text-sm font-medium hover:bg-[var(--color-navy-dark)]">
           <Mail className="h-4 w-4" />
           Correo Ejecutivo
-        </Link>
-        <Link href="/history" className="flex items-center gap-3 rounded-[8px] px-3 py-2 text-sm font-medium hover:bg-[var(--color-navy-dark)]">
-          <Clock className="h-4 w-4" />
-          Ver historial completo
         </Link>
         <Link href="/admin" className="flex items-center gap-3 rounded-[8px] px-3 py-2 text-sm font-medium hover:bg-[var(--color-navy-dark)]">
           <Settings className="h-4 w-4" />
