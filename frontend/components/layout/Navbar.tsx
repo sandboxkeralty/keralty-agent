@@ -2,9 +2,11 @@
 
 import * as React from "react";
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { LocaleSwitcher } from "./LocaleSwitcher";
 
 export function Navbar() {
+  const t = useTranslations("nav");
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -47,7 +49,7 @@ export function Navbar() {
               onClick={logout}
               className="text-sm text-[var(--color-navy)] underline hover:no-underline"
             >
-              Cerrar sesión
+              {t("logout")}
             </button>
           </div>
         ) : (
@@ -55,7 +57,7 @@ export function Navbar() {
             href={`${apiUrl}/auth/login`}
             className="text-sm font-medium text-[var(--color-primary)] hover:underline"
           >
-            Iniciar sesión
+            {t("login")}
           </a>
         )}
       </div>

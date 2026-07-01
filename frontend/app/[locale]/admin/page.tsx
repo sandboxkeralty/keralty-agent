@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useLocale, useTranslations } from "next-intl";
 import { Users, BarChart2, ShieldCheck, Settings, Loader2, RefreshCw, BookOpen, Upload, Trash2, FileText, CheckCircle } from "lucide-react";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -57,6 +58,8 @@ interface KBDoc {
 type Tab = "metrics" | "users" | "audit" | "kb" | "config";
 
 export default function AdminPage() {
+  const t = useTranslations("admin");
+  const locale = useLocale();
   const adminEnabled = process.env.NEXT_PUBLIC_ADMIN_ENABLED === "true";
 
   const [tab, setTab] = useState<Tab>("metrics");
@@ -71,28 +74,28 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const load = async (t: Tab) => {
+  const load = async (activeTab: Tab) => {
     setLoading(true);
     setError("");
     try {
-      if (t === "users") {
+      if (activeTab === "users") {
         const data = await apiFetch("/admin/users");
         setUsers(data.users || []);
-      } else if (t === "metrics") {
+      } else if (activeTab === "metrics") {
         const data = await apiFetch("/admin/metrics");
         setMetrics(data.metrics);
-      } else if (t === "audit") {
+      } else if (activeTab === "audit") {
         const data = await apiFetch("/admin/audit?limit=50");
         setAudit(data.logs || []);
-      } else if (t === "kb") {
+      } else if (activeTab === "kb") {
         const data = await apiFetch("/knowledge/documents");
         setKbDocs(data.documents || []);
-      } else if (t === "config") {
+      } else if (activeTab === "config") {
         const data = await apiFetch("/admin/configs");
         setConfigs(data.configs || {});
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Error cargando datos");
+      setError(e instanceof Error ? e.message : t("errorLoadingData"));
     } finally {
       setLoading(false);
     }
@@ -105,8 +108,8 @@ export default function AdminPage() {
   if (!adminEnabled) {
     return (
       <div className="p-8 max-w-4xl mx-auto w-full text-center">
-        <h1 className="text-2xl font-bold text-red-600">Acceso Denegado</h1>
-        <p className="text-[var(--color-text-muted)] mt-2">El panel de administración está deshabilitado.</p>
+        <h1 className="text-2xl font-bold text-red-600">{t("accessDenied")}</h1>
+        <p className="text-[var(--color-text-muted)] mt-2">{t("accessDeniedMessage")}</p>
       </div>
     );
   }
@@ -125,8 +128,8 @@ export default function AdminPage() {
         body: form,
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || "Upload failed");
-      setUploadMsg(`✓ ${data.filename} — ${data.chunk_count} chunks indexados`);
+      if (!res.ok) throw new Error(data.detail || t("uploadFailed"));
+      setUploadMsg(`✓ ${t("uploadSuccess", { filename: data.filename, count: data.chunk_count })}`);
       load("kb");
     } catch (err: unknown) {
       setUploadMsg(`Error: ${err instanceof Error ? err.message : String(err)}`);
@@ -149,23 +152,23 @@ export default function AdminPage() {
   };
 
   const tabs: { id: Tab; label: string; Icon: typeof Users }[] = [
-    { id: "metrics", label: "Métricas", Icon: BarChart2 },
-    { id: "users", label: "Usuarios", Icon: Users },
-    { id: "kb", label: "Knowledge Base", Icon: BookOpen },
-    { id: "audit", label: "Auditoría", Icon: ShieldCheck },
-    { id: "config", label: "Configuración", Icon: Settings },
+    { id: "metrics", label: t("tabMetrics"), Icon: BarChart2 },
+    { id: "users", label: t("tabUsers"), Icon: Users },
+    { id: "kb", label: t("tabKb"), Icon: BookOpen },
+    { id: "audit", label: t("tabAudit"), Icon: ShieldCheck },
+    { id: "config", label: t("tabConfig"), Icon: Settings },
   ];
 
   return (
     <div className="p-6 max-w-6xl mx-auto w-full">
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-[var(--color-navy)]">Panel de Administración</h1>
+        <h1 className="text-2xl font-bold text-[var(--color-navy)]">{t("title")}</h1>
         <button
           onClick={() => load(tab)}
           className="flex items-center gap-2 text-sm px-3 py-2 text-[var(--color-primary)] hover:bg-[var(--color-primary-light)] rounded-[8px] transition-colors"
         >
-          <RefreshCw size={15} /> Actualizar
+          <RefreshCw size={15} /> {t("refresh")}
         </button>
       </div>
 
@@ -189,7 +192,7 @@ export default function AdminPage() {
       {/* Loading / error */}
       {loading && (
         <div className="flex items-center gap-2 text-[var(--color-text-muted)] text-sm py-8 justify-center">
-          <Loader2 size={16} className="animate-spin" /> Cargando...
+          <Loader2 size={16} className="animate-spin" /> {t("loading")}
         </div>
       )}
       {error && (
@@ -202,10 +205,10 @@ export default function AdminPage() {
       {!loading && tab === "metrics" && metrics && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
-            { label: "Usuarios", value: metrics.users, color: "text-[var(--color-primary)]" },
-            { label: "Sesiones", value: metrics.sessions, color: "text-[var(--color-navy)]" },
-            { label: "Mensajes", value: metrics.messages, color: "text-green-600" },
-            { label: "Eventos de auditoría", value: metrics.audit_events, color: "text-orange-500" },
+            { label: t("metricUsers"), value: metrics.users, color: "text-[var(--color-primary)]" },
+            { label: t("metricSessions"), value: metrics.sessions, color: "text-[var(--color-navy)]" },
+            { label: t("metricMessages"), value: metrics.messages, color: "text-green-600" },
+            { label: t("metricAuditEvents"), value: metrics.audit_events, color: "text-orange-500" },
           ].map((m) => (
             <div
               key={m.label}
@@ -222,12 +225,12 @@ export default function AdminPage() {
       {!loading && tab === "users" && (
         <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm overflow-hidden">
           {users.length === 0 ? (
-            <p className="p-8 text-center text-[var(--color-text-muted)] text-sm">Sin usuarios registrados.</p>
+            <p className="p-8 text-center text-[var(--color-text-muted)] text-sm">{t("noUsers")}</p>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-[var(--color-background)] border-b border-[var(--color-border)]">
                 <tr>
-                  {["Usuario", "Email", "Rol", "Última actividad"].map((h) => (
+                  {[t("colUser"), t("colEmail"), t("colRole"), t("colLastActivity")].map((h) => (
                     <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-[var(--color-text-muted)] uppercase">
                       {h}
                     </th>
@@ -260,7 +263,7 @@ export default function AdminPage() {
                     </td>
                     <td className="px-4 py-3 text-[var(--color-text-muted)]">
                       {u.updated_at
-                        ? new Date(u.updated_at).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })
+                        ? new Date(u.updated_at).toLocaleString(locale, { dateStyle: "short", timeStyle: "short" })
                         : "—"}
                     </td>
                   </tr>
@@ -275,12 +278,12 @@ export default function AdminPage() {
       {!loading && tab === "audit" && (
         <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm overflow-hidden">
           {audit.length === 0 ? (
-            <p className="p-8 text-center text-[var(--color-text-muted)] text-sm">Sin eventos de auditoría.</p>
+            <p className="p-8 text-center text-[var(--color-text-muted)] text-sm">{t("noAuditEvents")}</p>
           ) : (
             <table className="w-full text-sm">
               <thead className="bg-[var(--color-background)] border-b border-[var(--color-border)]">
                 <tr>
-                  {["Fecha", "Acción", "Tipo", "Recurso", "Usuario (hash)"].map((h) => (
+                  {[t("colDate"), t("colAction"), t("colType"), t("colResource"), t("colUserHash")].map((h) => (
                     <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-[var(--color-text-muted)] uppercase">
                       {h}
                     </th>
@@ -291,7 +294,7 @@ export default function AdminPage() {
                 {audit.map((e) => (
                   <tr key={e.event_id} className="hover:bg-[var(--color-background)] transition-colors">
                     <td className="px-4 py-2.5 text-[var(--color-text-muted)] whitespace-nowrap">
-                      {new Date(e.timestamp).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })}
+                      {new Date(e.timestamp).toLocaleString(locale, { dateStyle: "short", timeStyle: "short" })}
                     </td>
                     <td className="px-4 py-2.5">
                       <ActionBadge action={e.action} />
@@ -317,10 +320,10 @@ export default function AdminPage() {
           {/* Upload card */}
           <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm p-5">
             <h3 className="font-semibold text-[var(--color-navy)] mb-3 flex items-center gap-2">
-              <Upload size={16} /> Subir documento
+              <Upload size={16} /> {t("uploadTitle")}
             </h3>
             <p className="text-xs text-[var(--color-text-muted)] mb-3">
-              Formatos admitidos: PDF, DOCX, TXT, CSV, MD — máx. 50 MB
+              {t("formatsHelp")}
             </p>
             <div className="flex items-center gap-3">
               <input
@@ -340,7 +343,7 @@ export default function AdminPage() {
                 }`}
               >
                 {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-                {uploading ? "Procesando..." : "Seleccionar archivo"}
+                {uploading ? t("processing") : t("selectFile")}
               </label>
               {uploadMsg && (
                 <span className={`text-sm flex items-center gap-1 ${uploadMsg.startsWith("✓") ? "text-green-600" : "text-red-600"}`}>
@@ -355,18 +358,18 @@ export default function AdminPage() {
           <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm overflow-hidden">
             <div className="px-5 py-3 border-b border-[var(--color-border)] flex items-center justify-between">
               <h3 className="font-semibold text-[var(--color-navy)] flex items-center gap-2">
-                <FileText size={15} /> Documentos indexados ({kbDocs.length})
+                <FileText size={15} /> {t("indexedDocuments", { count: kbDocs.length })}
               </h3>
             </div>
             {kbDocs.length === 0 ? (
               <p className="p-8 text-center text-[var(--color-text-muted)] text-sm">
-                No hay documentos en la Knowledge Base. Sube el primero arriba.
+                {t("noDocuments")}
               </p>
             ) : (
               <table className="w-full text-sm">
                 <thead className="bg-[var(--color-background)] border-b border-[var(--color-border)]">
                   <tr>
-                    {["Archivo", "Tipo", "Chunks", "Indexado", ""].map((h) => (
+                    {[t("colFile"), t("colFileType"), t("colChunks"), t("colIndexed"), ""].map((h) => (
                       <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-[var(--color-text-muted)] uppercase">
                         {h}
                       </th>
@@ -385,14 +388,14 @@ export default function AdminPage() {
                       <td className="px-4 py-3 text-[var(--color-text-muted)]">{doc.chunk_count}</td>
                       <td className="px-4 py-3 text-[var(--color-text-muted)]">
                         {doc.ingested_at
-                          ? new Date(doc.ingested_at).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })
+                          ? new Date(doc.ingested_at).toLocaleString(locale, { dateStyle: "short", timeStyle: "short" })
                           : "—"}
                       </td>
                       <td className="px-4 py-3 text-right">
                         <button
                           onClick={() => handleDeleteDoc(doc.doc_id)}
                           className="p-1.5 rounded text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                          title="Eliminar documento"
+                          title={t("deleteDocument")}
                         >
                           <Trash2 size={14} />
                         </button>
@@ -412,7 +415,7 @@ export default function AdminPage() {
           <table className="w-full text-sm">
             <thead className="bg-[var(--color-background)] border-b border-[var(--color-border)]">
               <tr>
-                {["Variable", "Valor"].map((h) => (
+                {[t("colVariable"), t("colValue")].map((h) => (
                   <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-[var(--color-text-muted)] uppercase">
                     {h}
                   </th>

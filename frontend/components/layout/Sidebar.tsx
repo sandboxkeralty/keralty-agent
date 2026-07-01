@@ -6,6 +6,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MessageSquare, Settings, Mail, Plus, Trash2, Loader2 } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { useChatSession, ChatMessage } from "@/hooks/useChatSession";
 
 interface SessionSummary {
@@ -17,20 +18,23 @@ interface SessionSummary {
   preview: string;
 }
 
-const GROUP_ORDER = ["Hoy", "Ayer", "Últimos 7 días", "Anteriores"];
+type GroupKey = "today" | "yesterday" | "last7Days" | "older";
+const GROUP_ORDER: GroupKey[] = ["today", "yesterday", "last7Days", "older"];
 
-function groupLabel(iso: string): string {
+function groupKey(iso: string): GroupKey {
   const date = new Date(iso);
   const now = new Date();
   const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
   const diffDays = Math.round((startOfDay(now) - startOfDay(date)) / 86400000);
-  if (diffDays <= 0) return "Hoy";
-  if (diffDays === 1) return "Ayer";
-  if (diffDays <= 7) return "Últimos 7 días";
-  return "Anteriores";
+  if (diffDays <= 0) return "today";
+  if (diffDays === 1) return "yesterday";
+  if (diffDays <= 7) return "last7Days";
+  return "older";
 }
 
 export function Sidebar() {
+  const t = useTranslations("sidebar");
+  const tNav = useTranslations("nav");
   const router = useRouter();
   const { sessionId, startNewConversation, loadSession, historyRefreshKey } = useChatSession();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
@@ -110,11 +114,11 @@ export function Sidebar() {
     }
   };
 
-  const grouped = sessions.reduce<Record<string, SessionSummary[]>>((acc, s) => {
-    const label = groupLabel(s.updated_at);
-    (acc[label] ||= []).push(s);
+  const grouped = sessions.reduce<Record<GroupKey, SessionSummary[]>>((acc, s) => {
+    const key = groupKey(s.updated_at);
+    (acc[key] ||= []).push(s);
     return acc;
-  }, {});
+  }, {} as Record<GroupKey, SessionSummary[]>);
 
   return (
     <aside className="hidden w-[280px] flex-col border-r bg-[var(--color-navy)] text-white md:flex">
@@ -130,33 +134,33 @@ export function Sidebar() {
           className="w-full flex items-center gap-3 rounded-[8px] px-3 py-2 text-sm font-medium bg-[var(--color-primary)] hover:bg-[var(--color-primary-dark)] transition-colors"
         >
           <Plus className="h-4 w-4" />
-          Nueva conversación
+          {tNav("newChat")}
         </button>
       </div>
 
       <nav className="px-4 py-2 space-y-1 border-b border-white/10">
         <Link href="/email" className="flex items-center gap-3 rounded-[8px] px-3 py-2 text-sm font-medium hover:bg-[var(--color-navy-dark)]">
           <Mail className="h-4 w-4" />
-          Correo Ejecutivo
+          {tNav("email")}
         </Link>
         <Link href="/admin" className="flex items-center gap-3 rounded-[8px] px-3 py-2 text-sm font-medium hover:bg-[var(--color-navy-dark)]">
           <Settings className="h-4 w-4" />
-          Administración
+          {tNav("admin")}
         </Link>
       </nav>
 
       <div className="flex-1 overflow-auto px-2 py-3">
         {loading ? (
           <div className="flex items-center gap-2 text-xs text-white/60 px-3 py-2">
-            <Loader2 className="h-3.5 w-3.5 animate-spin" /> Cargando...
+            <Loader2 className="h-3.5 w-3.5 animate-spin" /> {t("loading")}
           </div>
         ) : sessions.length === 0 ? (
-          <p className="text-xs text-white/40 px-3 py-2">Sin conversaciones aún.</p>
+          <p className="text-xs text-white/40 px-3 py-2">{t("noConversations")}</p>
         ) : (
-          GROUP_ORDER.filter((label) => grouped[label]?.length).map((label) => (
-            <div key={label} className="mb-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-white/40 px-3 mb-1">{label}</p>
-              {grouped[label].map((s) => (
+          GROUP_ORDER.filter((key) => grouped[key]?.length).map((key) => (
+            <div key={key} className="mb-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-white/40 px-3 mb-1">{t(key)}</p>
+              {grouped[key].map((s) => (
                 <button
                   key={s.session_id}
                   onClick={() => handleSelectSession(s)}
@@ -167,7 +171,7 @@ export function Sidebar() {
                   }`}
                 >
                   <MessageSquare className="h-3.5 w-3.5 shrink-0 opacity-60" />
-                  <span className="flex-1 min-w-0 truncate">{s.title || "Conversación"}</span>
+                  <span className="flex-1 min-w-0 truncate">{s.title || t("untitledConversation")}</span>
                   {switching === s.session_id ? (
                     <Loader2 className="h-3 w-3 animate-spin shrink-0" />
                   ) : (
@@ -175,7 +179,7 @@ export function Sidebar() {
                       role="button"
                       onClick={(e) => handleDelete(e, s)}
                       className="shrink-0 opacity-0 group-hover:opacity-100 hover:text-red-400 transition-opacity"
-                      title="Eliminar conversación"
+                      title={t("deleteConversation")}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </span>
