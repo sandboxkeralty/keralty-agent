@@ -155,7 +155,9 @@ Browser mic (getUserMedia 16 kHz mono)
     → Float32→Int16 PCM conversion
     → base64-encode → WebSocket ws://.../voice/stream
       → backend: routers/voice.py
-        → Gemini Live API (gemini-live-2.5-flash-native-audio, TEXT modality)
+        → Gemini Live API (gemini-live-2.5-flash, TEXT modality — the
+          "-native-audio" model variant only supports AUDIO output and
+          rejects TEXT modality outright)
         ← transcript text
       → WebSocket → VoiceChat.tsx accumulates transcript
         → onTranscript callback → ChatWindow sets input + auto-submits form
