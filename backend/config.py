@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     GOOGLE_API_KEY: Optional[str] = None
     GEMINI_FLASH_MODEL: str = "gemini-2.5-flash"
     GEMINI_PRO_MODEL: str = "gemini-2.5-pro"
-    GEMINI_LIVE_MODEL: str = "gemini-live-2.5-flash"
+    GEMINI_LIVE_MODEL: str = "gemini-live-2.5-flash-native-audio"
     IMAGEN_MODEL: str = "imagen-3.0-generate-001"
 
     GOOGLE_CLIENT_ID: str = ""

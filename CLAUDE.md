@@ -172,13 +172,18 @@ Browser mic (getUserMedia 16 kHz mono)
     → Float32→Int16 PCM conversion
     → base64-encode → WebSocket ws://.../voice/stream
       → backend: routers/voice.py
-        → Gemini Live API (gemini-live-2.5-flash, TEXT modality — the
-          "-native-audio" model variant only supports AUDIO output and
-          rejects TEXT modality outright)
-        ← transcript text
+        → Gemini Live API (gemini-live-2.5-flash-native-audio —
+          the only GA Live model on Vertex AI; there is no separate
+          "half-cascade"/TEXT-modality model on Vertex AI, only on the
+          direct Gemini API — response_modalities=["AUDIO"] is mandatory)
+        ← input_audio_transcription (the model's own spoken reply/audio
+          is generated but never read or forwarded — this feature is
+          speech-to-text input only, not a spoken conversation)
       → WebSocket → VoiceChat.tsx accumulates transcript
         → onTranscript callback → ChatWindow sets input + auto-submits form
 ```
+
+**Do not set `response_modalities=["TEXT"]` or guess at a different model name for this** — both were tried and both failed in production: `TEXT` modality is rejected outright by the native-audio model (`1007` error), and a guessed model name (`gemini-live-2.5-flash`, without `-native-audio`) doesn't exist in Vertex AI's publisher model catalog at all (`1008` "not found"). The correct mechanism is `input_audio_transcription=types.AudioTranscriptionConfig()` in `LiveConnectConfig`, read back via `message.server_content.input_transcription.text` (`.finished` signals the final chunk) — not `message.text`, which is the model's own generated text and doesn't exist under `AUDIO` modality.
 
 Key files: `frontend/components/chat/VoiceChat.tsx`, `frontend/public/audio-processor.js`, `backend/routers/voice.py`.
 

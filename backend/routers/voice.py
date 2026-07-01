@@ -62,8 +62,14 @@ async def voice_stream(websocket: WebSocket):
     await _safe_send(websocket, {"type": "status", "message": "connected"})
 
     client = _get_genai_client()
+    # gemini-live-2.5-flash-native-audio is the only GA Live model on Vertex AI, and it only
+    # supports AUDIO response modality (TEXT is rejected outright). This app only needs a
+    # transcript of what the user said, not a spoken reply, so we request input audio
+    # transcription instead of relying on response text — the model's audio reply is generated
+    # but never read or forwarded to the browser.
     live_config = types.LiveConnectConfig(
-        response_modalities=["TEXT"],
+        response_modalities=["AUDIO"],
+        input_audio_transcription=types.AudioTranscriptionConfig(),
         system_instruction=_SYSTEM_INSTRUCTION,
         temperature=0.2,
     )
@@ -128,20 +134,24 @@ async def _recv_browser(websocket: WebSocket, session) -> None:
 
 
 async def _recv_gemini(websocket: WebSocket, session) -> None:
-    """Forward Gemini Live responses back to the browser."""
+    """Forward the input-audio transcript (what the user said) back to the browser.
+
+    message.text would be the model's own spoken reply text, which doesn't exist here since
+    response_modalities is AUDIO — the transcript of the user's speech comes from
+    server_content.input_transcription instead.
+    """
     async for message in session.receive():
-        text = message.text
-        if text:
-            turn_complete = bool(
-                message.server_content and message.server_content.turn_complete
-            )
+        sc = message.server_content
+        transcription = sc.input_transcription if sc else None
+
+        if transcription and transcription.text:
             await _safe_send(websocket, {
                 "type": "transcript",
-                "text": text,
-                "final": turn_complete,
+                "text": transcription.text,
+                "final": bool(transcription.finished),
             })
 
-        if message.server_content and message.server_content.turn_complete:
+        if sc and sc.turn_complete:
             await _safe_send(websocket, {"type": "turn_complete"})
 
 
