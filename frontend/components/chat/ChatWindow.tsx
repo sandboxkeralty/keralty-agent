@@ -2,15 +2,33 @@
 
 import { useState, useRef, useEffect } from 'react';
 import type { ImgHTMLAttributes } from 'react';
-import { Send, Bot, User, Paperclip, X, Download } from 'lucide-react';
+import { Send, Bot, User, Paperclip, X, Download, Volume2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { SourceChip } from './SourceChip';
 import { ApprovalCard } from './ApprovalCard';
 import { DocumentPicker, DriveFile } from '../documents/DocumentPicker';
 import { VoiceChat } from './VoiceChat';
-import { useTranslations } from 'next-intl';
+import { useTranslations, useLocale } from 'next-intl';
 import { useChatSession, ChatMessage } from '@/hooks/useChatSession';
+
+// Strips Markdown syntax so it isn't read aloud literally (e.g. "asterisk asterisk").
+function stripMarkdownForSpeech(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/(\*\*|__)(.*?)\1/g, '$2')
+    .replace(/(\*|_)(.*?)\1/g, '$2')
+    .replace(/^\s*[-*+]\s+/gm, '')
+    .replace(/^\s*\d+\.\s+/gm, '')
+    .replace(/\|/g, ' ')
+    .replace(/\n{2,}/g, '. ')
+    .replace(/\n/g, ' ')
+    .trim();
+}
 
 function MarkdownImage({ src, alt }: ImgHTMLAttributes<HTMLImageElement>) {
   const imgSrc = typeof src === 'string' ? src : undefined;
@@ -60,14 +78,35 @@ interface PendingTask {
 
 export function ChatWindow() {
   const t = useTranslations('chat');
+  const locale = useLocale();
   const { sessionId, messages, setMessages, bumpHistoryRefresh } = useChatSession();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
   const [showPicker, setShowPicker] = useState(false);
   const [attachedDoc, setAttachedDoc] = useState<{ file: DriveFile; text: string } | null>(null);
+  const [isSpeaking, setIsSpeaking] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const voiceTurnRef = useRef(false);
+
+  const speak = (text: string) => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(stripMarkdownForSpeech(text));
+    utterance.lang = locale === 'es' ? 'es-ES' : 'en-US';
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const stopSpeaking = () => {
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    setIsSpeaking(false);
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -127,6 +166,8 @@ export function ChatWindow() {
   };
 
   const handleTranscript = (text: string) => {
+    stopSpeaking();
+    voiceTurnRef.current = true;
     setInput(text);
     setTimeout(() => formRef.current?.requestSubmit(), 80);
   };
@@ -179,7 +220,8 @@ export function ChatWindow() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      
+      let fullText = '';
+
       let done = false;
       while (!done) {
         const { value, done: doneReading } = await reader.read();
@@ -188,14 +230,15 @@ export function ChatWindow() {
           buffer += decoder.decode(value, { stream: !done });
           const lines = buffer.split('\n\n');
           buffer = lines.pop() || '';
-          
+
           for (const line of lines) {
             if (line.startsWith('data: ')) {
               const dataStr = line.slice(6);
               try {
                 const data = JSON.parse(dataStr);
                 if (data.type === 'content') {
-                  setMessages(prev => prev.map(m => 
+                  fullText += data.text;
+                  setMessages(prev => prev.map(m =>
                     m.id === assistantId ? { ...m, content: m.content + data.text } : m
                   ));
                 } else if (data.type === 'source') {
@@ -219,11 +262,17 @@ export function ChatWindow() {
         m.id === assistantId ? { ...m, isStreaming: false } : m
       ));
       bumpHistoryRefresh();
+
+      if (voiceTurnRef.current && fullText.trim()) {
+        speak(fullText);
+      }
+      voiceTurnRef.current = false;
     } catch (err) {
       console.error(err);
       setMessages(prev => prev.map(m =>
         m.id === assistantId ? { ...m, content: 'Error communicating with the assistant.', isStreaming: false } : m
       ));
+      voiceTurnRef.current = false;
     } finally {
       setLoading(false);
     }
@@ -280,6 +329,18 @@ export function ChatWindow() {
                 <X size={11} />
               </button>
             </span>
+          </div>
+        )}
+        {isSpeaking && (
+          <div className="flex items-center gap-2 mb-2 px-1">
+            <button
+              type="button"
+              onClick={stopSpeaking}
+              className="flex items-center gap-1.5 text-xs bg-[var(--color-primary-light)] text-[var(--color-primary)] px-2 py-1 rounded-full border border-[var(--color-primary)]/30 hover:bg-[var(--color-primary)]/10 transition-colors"
+            >
+              <Volume2 size={11} className="animate-pulse" />
+              {locale === 'es' ? 'Detener respuesta hablada' : 'Stop spoken reply'}
+            </button>
           </div>
         )}
         <div className="relative flex items-center gap-2">

@@ -181,11 +181,17 @@ Browser mic (getUserMedia 16 kHz mono)
           speech-to-text input only, not a spoken conversation)
       → WebSocket → VoiceChat.tsx accumulates transcript
         → onTranscript callback → ChatWindow sets input + auto-submits form
+          → normal /api/chat SSE turn through the full Orchestrator + agents
+            → ChatWindow.speak() reads the finished reply aloud via the
+              browser's native Web Speech API (window.speechSynthesis) —
+              only for turns that started as voice input (voiceTurnRef)
 ```
 
 **Do not set `response_modalities=["TEXT"]` or guess at a different model name for this** — both were tried and both failed in production: `TEXT` modality is rejected outright by the native-audio model (`1007` error), and a guessed model name (`gemini-live-2.5-flash`, without `-native-audio`) doesn't exist in Vertex AI's publisher model catalog at all (`1008` "not found"). The correct mechanism is `input_audio_transcription=types.AudioTranscriptionConfig()` in `LiveConnectConfig`, read back via `message.server_content.input_transcription.text` (`.finished` signals the final chunk) — not `message.text`, which is the model's own generated text and doesn't exist under `AUDIO` modality.
 
-Key files: `frontend/components/chat/VoiceChat.tsx`, `frontend/public/audio-processor.js`, `backend/routers/voice.py`.
+**Spoken replies are speech-to-text-in, full-agent-turn, text-to-speech-out — not a live audio conversation.** `ChatWindow.tsx` speaks the assistant's finished text response via the browser's own `speechSynthesis` API (no backend TTS call, no new dependency) so a voice-initiated question gets a spoken answer back, but the round trip still goes through the complete `/api/chat` SSE pipeline (Orchestrator, all 8 agents, RAG, HITL approvals — everything works exactly as it does for typed input). This deliberately trades true real-time audio-to-audio latency for keeping every existing capability intact. A genuine low-latency live audio-to-audio experience with tool-calling access was scoped but intentionally deferred — see `docs/live-voice-architecture-proposal.md` for what that would require.
+
+Key files: `frontend/components/chat/VoiceChat.tsx`, `frontend/components/chat/ChatWindow.tsx` (`speak`/`stopSpeaking`/`voiceTurnRef`), `frontend/public/audio-processor.js`, `backend/routers/voice.py`.
 
 ### RAG / Knowledge Base pipeline
 
@@ -396,3 +402,6 @@ the white backing.
 - `docs/use-cases-strategic-testing.md` — end-to-end test scenarios for every feature, written
   from an executive user's perspective; run through this after any deployment that touches more
   than one component
+- `docs/live-voice-architecture-proposal.md` — scoped-but-deferred proposal for a true real-time,
+  low-latency voice conversation with full tool/agent access (not implemented; requires a
+  product decision on how HITL approvals work in a spoken flow before it can be estimated)
