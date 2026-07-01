@@ -66,10 +66,15 @@ def _split_sentences(text: str) -> List[str]:
 def _merge_into_chunks(blocks: List[str], max_tokens: int) -> List[str]:
     """Greedy merge: accumulate until the next block would exceed max_tokens.
     Oversized individual blocks are split at sentence boundaries.
+
+    Measures the token count of the actual prospective joined string rather than
+    summing each block's individually-truncated approximation — summing
+    per-block `len // 4` estimates systematically undercounts the true joined
+    length (floor-division drift plus untracked join-separator characters),
+    letting the buffer silently grow past max_tokens over many small blocks.
     """
     chunks: List[str] = []
     buf: List[str] = []
-    buf_tok = 0
 
     for block in blocks:
         block_tok = _approx_tokens(block)
@@ -78,27 +83,25 @@ def _merge_into_chunks(blocks: List[str], max_tokens: int) -> List[str]:
             # Flush accumulator first
             if buf:
                 chunks.append(" ".join(buf))
-                buf, buf_tok = [], 0
+                buf = []
             # Split oversized block at sentences
             sent_buf: List[str] = []
-            sent_tok = 0
             for s in _split_sentences(block):
-                st = _approx_tokens(s)
-                if sent_tok + st > max_tokens and sent_buf:
+                candidate = " ".join(sent_buf + [s])
+                if sent_buf and _approx_tokens(candidate) > max_tokens:
                     chunks.append(" ".join(sent_buf))
-                    sent_buf, sent_tok = [], 0
+                    sent_buf = []
                 sent_buf.append(s)
-                sent_tok += st
             if sent_buf:
                 chunks.append(" ".join(sent_buf))
             continue
 
-        if buf_tok + block_tok > max_tokens and buf:
+        candidate = " ".join(buf + [block])
+        if buf and _approx_tokens(candidate) > max_tokens:
             chunks.append(" ".join(buf))
-            buf, buf_tok = [], 0
+            buf = []
 
         buf.append(block)
-        buf_tok += block_tok
 
     if buf:
         chunks.append(" ".join(buf))
@@ -122,17 +125,27 @@ def _apply_overlap(chunks: List[str], overlap_pct: float) -> List[str]:
     return result
 
 
-def _coalesce_small(chunks: List[str], min_tokens: int) -> List[str]:
-    """Merge chunks < min_tokens with their successor."""
+def _coalesce_small(chunks: List[str], min_tokens: int, max_tokens: int) -> List[str]:
+    """Merge chunks < min_tokens with their successor, without exceeding max_tokens.
+
+    A long run of tiny fragments (common in PDF extractions with broken paragraph
+    structure — tables, forms, multi-column layouts) would otherwise cascade into
+    one unbounded chunk, since merging always re-checks the newly-grown chunk
+    against min_tokens with no upper bound.
+    """
     result: List[str] = []
     i = 0
     while i < len(chunks):
-        if _approx_tokens(chunks[i]) < min_tokens and i + 1 < len(chunks):
-            chunks[i + 1] = chunks[i] + " " + chunks[i + 1]
+        current = chunks[i]
+        while (
+            _approx_tokens(current) < min_tokens
+            and i + 1 < len(chunks)
+            and _approx_tokens(current) + _approx_tokens(chunks[i + 1]) <= max_tokens
+        ):
             i += 1
-        else:
-            result.append(chunks[i])
-            i += 1
+            current = current + " " + chunks[i]
+        result.append(current)
+        i += 1
     return result
 
 
@@ -150,8 +163,8 @@ def chunk_document(
     """Full chunking pipeline. Returns a list of Chunk objects with neighbor links."""
     paragraphs = _split_paragraphs(text)
     raw = _merge_into_chunks(paragraphs, max_tokens)
+    raw = _coalesce_small(raw, min_tokens, max_tokens)
     raw = _apply_overlap(raw, overlap_pct)
-    raw = _coalesce_small(raw, min_tokens)
 
     chunks: List[Chunk] = []
     for i, text_chunk in enumerate(raw):
