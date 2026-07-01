@@ -1,5 +1,6 @@
 from google.adk.agents import Agent
 from google.adk.tools import google_search
+from google.adk.tools.agent_tool import AgentTool
 from tools.drive_tools import drive_read, drive_search
 
 INSTRUCTION = """
@@ -29,10 +30,19 @@ externas de internet autorizadas por la organización.
 4. Si la búsqueda web está deshabilitada (SEARCH_GROUNDING_ENABLED=false), informa al usuario y trabaja solo con fuentes internas.
 """
 
+_web_search_agent = Agent(
+    name="WebSearchAgent",
+    model="gemini-2.5-flash",
+    instruction="Busca en la web pública información relevante a la consulta recibida. "
+                "Devuelve los hallazgos con URL, título, dominio y un fragmento relevante de cada fuente.",
+    description="Searches the public web for external information using Google Search.",
+    tools=[google_search],
+)
+
 research_agent = Agent(
     name="ResearchAgent",
     model="gemini-2.5-flash",
     instruction=INSTRUCTION,
     description="Researches information using web search and internal Drive documents.",
-    tools=[drive_search, drive_read, google_search]
+    tools=[drive_search, drive_read, AgentTool(agent=_web_search_agent)]
 )
