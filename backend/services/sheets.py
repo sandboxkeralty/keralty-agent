@@ -1,4 +1,5 @@
 import io
+import datetime
 from googleapiclient.discovery import build
 import google.auth
 from typing import Dict, Any, List
@@ -34,6 +35,13 @@ def _load_xlsx_workbook(file_id: str, credentials=None):
     content = drive.files().get_media(fileId=file_id).execute()
     return load_workbook(io.BytesIO(content), data_only=True, read_only=True)
 
+def _json_safe(value):
+    if value is None:
+        return ""
+    if isinstance(value, (datetime.datetime, datetime.date, datetime.time)):
+        return value.isoformat()
+    return value
+
 class SheetsService:
     @staticmethod
     def get_spreadsheet(spreadsheet_id: str, credentials=None) -> Dict[str, Any]:
@@ -57,7 +65,7 @@ class SheetsService:
                 tab_name, cell_range = range_name, None
             ws = wb[tab_name] if tab_name in wb.sheetnames else wb.active
             rows = ws[cell_range] if cell_range else ws.iter_rows()
-            values = [["" if c.value is None else c.value for c in row] for row in rows]
+            values = [[_json_safe(c.value) for c in row] for row in rows]
             while values and all(v == "" for v in values[-1]):
                 values.pop()
             return values
