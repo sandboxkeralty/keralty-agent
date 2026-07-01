@@ -4,7 +4,8 @@ from typing import List
 from config import settings
 
 _MODEL_NAME = "text-embedding-005"
-_BATCH_SIZE = 250  # Vertex AI max per request
+_MAX_BATCH_ITEMS = 250  # Vertex AI max items per request
+_MAX_BATCH_TOKENS = 18000  # safety margin under the model's 20000-token per-request limit
 
 
 def _init_vertexai():
@@ -12,10 +13,17 @@ def _init_vertexai():
     vertexai.init(project=settings.GOOGLE_CLOUD_PROJECT, location=settings.GOOGLE_CLOUD_REGION)
 
 
+def _estimate_tokens(text: str) -> int:
+    return max(1, len(text) // 4)
+
+
 def embed_texts(texts: List[str], task_type: str = "RETRIEVAL_DOCUMENT") -> List[List[float]]:
     """Returns one embedding vector per input text.
 
     task_type: "RETRIEVAL_DOCUMENT" for indexing, "RETRIEVAL_QUERY" for queries.
+    Batches respect both a max item count and a max total token budget per
+    request, since a batch of large chunks can exceed the model's per-request
+    token limit well before hitting the item-count cap.
     """
     _init_vertexai()
     from vertexai.language_models import TextEmbeddingModel, TextEmbeddingInput
@@ -23,12 +31,27 @@ def embed_texts(texts: List[str], task_type: str = "RETRIEVAL_DOCUMENT") -> List
     model = TextEmbeddingModel.from_pretrained(_MODEL_NAME)
     all_embeddings: List[List[float]] = []
 
-    for i in range(0, len(texts), _BATCH_SIZE):
-        batch = texts[i : i + _BATCH_SIZE]
+    batch: List[str] = []
+    batch_tokens = 0
+
+    def _flush():
+        nonlocal batch, batch_tokens
+        if not batch:
+            return
         inputs = [TextEmbeddingInput(text=t, task_type=task_type) for t in batch]
         results = model.get_embeddings(inputs)
         all_embeddings.extend(r.values for r in results)
+        batch = []
+        batch_tokens = 0
 
+    for text in texts:
+        tokens = _estimate_tokens(text)
+        if batch and (len(batch) >= _MAX_BATCH_ITEMS or batch_tokens + tokens > _MAX_BATCH_TOKENS):
+            _flush()
+        batch.append(text)
+        batch_tokens += tokens
+
+    _flush()
     return all_embeddings
 
 

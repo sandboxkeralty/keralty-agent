@@ -52,10 +52,10 @@ def extract_text(data: bytes, filetype: str) -> str:
 def _upload_to_gcs(data: bytes, filename: str, doc_id: str) -> str:
     from google.cloud import storage
     client = storage.Client(project=settings.GOOGLE_CLOUD_PROJECT)
-    bucket = client.bucket(settings.KB_GCS_BUCKET)
-    blob = bucket.blob(f"documents/{doc_id}/{filename}")
+    bucket = client.bucket(settings.GCS_BUCKET)
+    blob = bucket.blob(f"kb/{doc_id}/{filename}")
     blob.upload_from_string(data)
-    return f"gs://{settings.KB_GCS_BUCKET}/documents/{doc_id}/{filename}"
+    return f"gs://{settings.GCS_BUCKET}/kb/{doc_id}/{filename}"
 
 
 # ── Main pipeline ─────────────────────────────────────────────────────────────

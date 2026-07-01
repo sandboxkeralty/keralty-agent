@@ -54,7 +54,6 @@ class Settings(BaseSettings):
 
     KB_AGENT_ENABLED: bool = True
     KB_RAG_CORPUS_ID: str = "keralty-kb-corpus-prod"
-    KB_GCS_BUCKET: str = "keralty-kb-documents"
     KB_INDEX_ENDPOINT: Optional[str] = None
     KB_MAX_RESULTS: int = 10
 
