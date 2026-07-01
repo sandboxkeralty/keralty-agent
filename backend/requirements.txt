@@ -24,3 +24,4 @@ pypdf
 python-docx
 rank-bm25
 numpy
+openpyxl

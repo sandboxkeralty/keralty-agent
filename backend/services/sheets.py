@@ -1,3 +1,4 @@
+import io
 from googleapiclient.discovery import build
 import google.auth
 from typing import Dict, Any, List
@@ -6,6 +7,11 @@ _SHEETS_SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/drive',
 ]
+
+_XLSX_MIME_TYPES = {
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
+}
 
 def get_sheets_service(credentials=None):
     if credentials is None:
@@ -17,14 +23,44 @@ def get_drive_service(credentials=None):
         credentials, _ = google.auth.default(scopes=_SHEETS_SCOPES)
     return build('drive', 'v3', credentials=credentials)
 
+def _is_raw_excel_file(file_id: str, credentials=None) -> bool:
+    drive = get_drive_service(credentials)
+    meta = drive.files().get(fileId=file_id, fields="mimeType").execute()
+    return meta.get("mimeType") in _XLSX_MIME_TYPES
+
+def _load_xlsx_workbook(file_id: str, credentials=None):
+    from openpyxl import load_workbook
+    drive = get_drive_service(credentials)
+    content = drive.files().get_media(fileId=file_id).execute()
+    return load_workbook(io.BytesIO(content), data_only=True, read_only=True)
+
 class SheetsService:
     @staticmethod
     def get_spreadsheet(spreadsheet_id: str, credentials=None) -> Dict[str, Any]:
+        if _is_raw_excel_file(spreadsheet_id, credentials):
+            wb = _load_xlsx_workbook(spreadsheet_id, credentials)
+            sheets = [
+                {"properties": {"sheetId": i, "title": name, "index": i}}
+                for i, name in enumerate(wb.sheetnames)
+            ]
+            return {"sheets": sheets}
         service = get_sheets_service(credentials)
         return service.spreadsheets().get(spreadsheetId=spreadsheet_id).execute()
 
     @staticmethod
     def read_range(spreadsheet_id: str, range_name: str, credentials=None) -> List[List[Any]]:
+        if _is_raw_excel_file(spreadsheet_id, credentials):
+            wb = _load_xlsx_workbook(spreadsheet_id, credentials)
+            if "!" in range_name:
+                tab_name, cell_range = range_name.split("!", 1)
+            else:
+                tab_name, cell_range = range_name, None
+            ws = wb[tab_name] if tab_name in wb.sheetnames else wb.active
+            rows = ws[cell_range] if cell_range else ws.iter_rows()
+            values = [["" if c.value is None else c.value for c in row] for row in rows]
+            while values and all(v == "" for v in values[-1]):
+                values.pop()
+            return values
         service = get_sheets_service(credentials)
         result = service.spreadsheets().values().get(
             spreadsheetId=spreadsheet_id, range=range_name).execute()

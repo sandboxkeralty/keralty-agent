@@ -13,11 +13,17 @@ _DEFAULT_MIME_TYPES = [
     'application/vnd.google-apps.document',
     'application/vnd.google-apps.presentation',
     'application/vnd.google-apps.spreadsheet',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'application/vnd.ms-excel',
 ]
 _MIME_TYPE_ALIASES = {
-    'document': 'application/vnd.google-apps.document',
-    'presentation': 'application/vnd.google-apps.presentation',
-    'spreadsheet': 'application/vnd.google-apps.spreadsheet',
+    'document': ['application/vnd.google-apps.document'],
+    'presentation': ['application/vnd.google-apps.presentation'],
+    'spreadsheet': [
+        'application/vnd.google-apps.spreadsheet',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.ms-excel',
+    ],
 }
 
 class DriveService:
@@ -26,7 +32,9 @@ class DriveService:
                         mime_types: List[str] = None) -> List[Dict[str, Any]]:
         service = get_drive_service(credentials)
         types = mime_types if mime_types else _DEFAULT_MIME_TYPES
-        resolved = [_MIME_TYPE_ALIASES.get(t, t) for t in types]
+        resolved = []
+        for t in types:
+            resolved.extend(_MIME_TYPE_ALIASES.get(t, [t]))
         mime_clause = " or ".join(f"mimeType='{t}'" for t in resolved)
         q = f"({mime_clause})"
         if query:
@@ -54,7 +62,11 @@ class DriveService:
             ):
                 response = service.files().export_media(fileId=file_id, mimeType='text/plain').execute()
                 return response.decode('utf-8')
-            if mime_type == 'application/vnd.google-apps.spreadsheet':
+            if mime_type in (
+                'application/vnd.google-apps.spreadsheet',
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'application/vnd.ms-excel',
+            ):
                 from services.sheets import SheetsService
                 meta = SheetsService.get_spreadsheet(file_id, credentials=credentials)
                 tabs = [s['properties']['title'] for s in meta.get('sheets', [])]
