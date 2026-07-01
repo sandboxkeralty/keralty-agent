@@ -32,6 +32,7 @@ confidencialidad y eficiencia.
 - Crear una NUEVA hoja de cálculo, tabla de datos o Google Spreadsheet → WritingAgent
 - Editar documento o hoja de cálculo EXISTENTE de Workspace (Docs o Sheets) → EditingAgent
 - Crear presentación → VisualAgent (con aprobación del outline primero)
+- Generar o crear una imagen suelta (no una presentación completa) → VisualAgent
 - Cualquier escritura en Workspace → OBLIGATORIO pasar por flujo de aprobación humana
 - Leer, resumir, buscar o gestionar correos → EmailAgent
 - Redactar correo → EmailAgent (borrador siempre requiere aprobación antes de enviar)

@@ -1,0 +1,92 @@
+from datetime import datetime, timezone
+from fastapi import APIRouter, Request
+from auth.google_oauth import credentials_from_dict, credentials_to_dict
+from services.firestore import FirestoreService, db
+from services.email.gmail_provider import GmailProvider
+
+router = APIRouter(prefix="/api/email", tags=["email"])
+
+
+def _credentials_for_user(user_id: str):
+    creds_dict = FirestoreService.get_user_credentials(user_id)
+    if not creds_dict:
+        return None
+    creds = credentials_from_dict(creds_dict)
+    if creds.expired and creds.refresh_token:
+        try:
+            from google.auth.transport.requests import Request as GRequest
+            creds.refresh(GRequest())
+            FirestoreService.store_user_credentials(user_id, {}, credentials_to_dict(creds))
+        except Exception as e:
+            print(f"[email summary] token refresh failed: {e}")
+    return creds
+
+
+def _dedupe_by_thread(messages: list) -> list:
+    seen = set()
+    unique = []
+    for m in messages:
+        tid = m.get("thread_id")
+        if tid in seen:
+            continue
+        seen.add(tid)
+        unique.append(m)
+    return unique
+
+
+@router.get("/summary")
+def get_email_summary(request: Request):
+    user = getattr(request.state, "user", {})
+    user_id = user.get("email") or user.get("uid") or "sandbox-user"
+    creds = _credentials_for_user(user_id)
+
+    today = datetime.now(timezone.utc).strftime("%Y/%m/%d")
+
+    try:
+        inbox_today_raw = GmailProvider.search_threads(f"in:inbox after:{today}", max_results=50, credentials=creds)
+        inbox_today = _dedupe_by_thread(inbox_today_raw)
+    except Exception as e:
+        print(f"[email summary] inbox fetch failed: {e}")
+        inbox_today = []
+
+    try:
+        criticos = len(_dedupe_by_thread(
+            GmailProvider.search_threads(f"in:inbox is:important after:{today}", max_results=50, credentials=creds)
+        ))
+    except Exception as e:
+        print(f"[email summary] criticos fetch failed: {e}")
+        criticos = 0
+
+    try:
+        pendientes = len(_dedupe_by_thread(
+            GmailProvider.search_threads(f"in:inbox is:unread after:{today}", max_results=50, credentials=creds)
+        ))
+    except Exception as e:
+        print(f"[email summary] pendientes fetch failed: {e}")
+        pendientes = 0
+
+    try:
+        tracked_docs = db.collection("email_tracking").where(
+            "user_id", "==", user_id
+        ).where("status", "==", "waiting").stream()
+        tracked = [{"tracking_id": doc.id, **doc.to_dict()} for doc in tracked_docs]
+        for t in tracked:
+            if "deadline" in t and hasattr(t["deadline"], "isoformat"):
+                t["deadline"] = t["deadline"].isoformat()
+            if "created_at" in t and hasattr(t["created_at"], "isoformat"):
+                t["created_at"] = t["created_at"].isoformat()
+    except Exception as e:
+        print(f"[email summary] tracking fetch failed: {e}")
+        tracked = []
+
+    return {
+        "status": "success",
+        "inbox_today": inbox_today,
+        "tracked": tracked,
+        "indicators": {
+            "bandeja": len(inbox_today),
+            "criticos": criticos,
+            "pendientes": pendientes,
+            "seguimiento": len(tracked),
+        },
+    }

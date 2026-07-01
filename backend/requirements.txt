@@ -19,6 +19,7 @@ pydantic-settings
 python-dotenv
 python-jose[cryptography]
 email-validator
+python-multipart
 # RAG pipeline
 pypdf
 python-docx

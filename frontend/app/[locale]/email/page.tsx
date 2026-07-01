@@ -19,22 +19,34 @@ interface TrackedEmail {
   status: string;
 }
 
+interface EmailIndicators {
+  bandeja: number;
+  criticos: number;
+  pendientes: number;
+  seguimiento: number;
+}
+
 export default function EmailPage() {
   const [threads, setThreads] = useState<EmailThread[]>([]);
   const [tracked, setTracked] = useState<TrackedEmail[]>([]);
+  const [indicators, setIndicators] = useState<EmailIndicators>({ bandeja: 0, criticos: 0, pendientes: 0, seguimiento: 0 });
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'inbox' | 'tracking'>('inbox');
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
   const getToken = () => typeof window !== 'undefined' ? localStorage.getItem('keralty_token') || 'test-token' : 'test-token';
 
-  const fetchInbox = async () => {
+  const fetchSummary = async () => {
     setLoading(true);
     try {
-      await fetch(`${apiUrl}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
-        body: JSON.stringify({ message: 'lista mis últimos correos de la bandeja de entrada, máximo 20', session_id: 'email-inbox-session' }),
+      const res = await fetch(`${apiUrl}/api/email/summary`, {
+        headers: { Authorization: `Bearer ${getToken()}` },
       });
+      if (res.ok) {
+        const data = await res.json();
+        setThreads(data.inbox_today || []);
+        setTracked(data.tracked || []);
+        setIndicators(data.indicators || { bandeja: 0, criticos: 0, pendientes: 0, seguimiento: 0 });
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -43,7 +55,7 @@ export default function EmailPage() {
   };
 
   useEffect(() => {
-    setLoading(false); // Email data comes via the agent chat; this page is a navigation hub
+    fetchSummary();
   }, []);
 
   return (
@@ -55,7 +67,7 @@ export default function EmailPage() {
           <h1 className="text-2xl font-bold text-[var(--color-navy)]">Correo Ejecutivo</h1>
         </div>
         <button
-          onClick={fetchInbox}
+          onClick={fetchSummary}
           className="flex items-center gap-2 px-3 py-2 text-sm text-[var(--color-primary)] hover:bg-[var(--color-primary-light)] rounded-[8px] transition-colors"
         >
           <RefreshCw className="h-4 w-4" /> Actualizar
@@ -65,10 +77,10 @@ export default function EmailPage() {
       {/* Stats bar */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {[
-          { label: 'Bandeja', value: threads.length || '—', color: 'text-[var(--color-primary)]' },
-          { label: 'Críticos', value: '—', color: 'text-red-500' },
-          { label: 'Pendientes', value: '—', color: 'text-orange-500' },
-          { label: 'Seguimiento', value: tracked.length || '—', color: 'text-yellow-600' },
+          { label: 'Bandeja', value: indicators.bandeja, color: 'text-[var(--color-primary)]' },
+          { label: 'Críticos', value: indicators.criticos, color: 'text-red-500' },
+          { label: 'Pendientes', value: indicators.pendientes, color: 'text-orange-500' },
+          { label: 'Seguimiento', value: indicators.seguimiento, color: 'text-yellow-600' },
         ].map(s => (
           <div key={s.label} className="bg-white border border-[var(--color-border)] rounded-[12px] p-3 text-center shadow-sm">
             <span className={`text-2xl font-bold ${s.color}`}>{s.value}</span>
@@ -101,10 +113,10 @@ export default function EmailPage() {
             <div className="p-8 text-center">
               <Mail className="h-10 w-10 text-[var(--color-text-muted)] mx-auto mb-3" />
               <p className="text-[var(--color-text-muted)] text-sm">
-                Usa el chat para pedir al asistente que liste tu bandeja de entrada.
+                No se han recibido correos hoy en tu bandeja de entrada.
               </p>
               <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                {'Ejemplo: "Lista mis últimos 20 correos" en el chat principal.'}
+                {'También puedes pedirle al asistente: "Lista mis últimos 20 correos" en el chat principal.'}
               </p>
             </div>
           ) : (

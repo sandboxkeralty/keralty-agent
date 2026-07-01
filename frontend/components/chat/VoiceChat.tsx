@@ -10,7 +10,9 @@ interface Props {
 }
 
 const API_URL = () =>
-  (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000").replace(/^http/, "ws");
+  (process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000")
+    .replace(/^https:/, "wss:")
+    .replace(/^http:/, "ws:");
 
 export function VoiceChat({ onTranscript }: Props) {
   const [status, setStatus] = useState<Status>("idle");

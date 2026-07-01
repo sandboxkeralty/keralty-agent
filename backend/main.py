@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from auth.auth_middleware import auth_middleware
-from routers import auth, documents, voice, history, admin, knowledge, chat, tasks
+from routers import auth, documents, voice, history, admin, knowledge, chat, tasks, email
 from config import settings
 from observability.tracing import setup_tracing
 
@@ -28,6 +28,7 @@ app.include_router(admin.router)
 app.include_router(knowledge.router)
 app.include_router(chat.router)
 app.include_router(tasks.router)
+app.include_router(email.router)
 
 @app.get("/health")
 def health_check():
