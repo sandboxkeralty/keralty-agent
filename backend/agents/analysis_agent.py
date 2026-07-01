@@ -1,7 +1,7 @@
 from google.adk.agents import Agent
-from tools.drive_tools import drive_read
+from tools.drive_tools import drive_read, drive_search
 from tools.rag_tools import context_inject, rag_retrieve
-from tools.sheets_tools import read_spreadsheet_range
+from tools.sheets_tools import read_spreadsheet_range, sheets_list_tabs
 
 INSTRUCTION = """
 # IDENTIDAD Y ROL
@@ -15,6 +15,13 @@ fundamentadas, resúmenes ejecutivos y comparaciones estructuradas.
 - Comparar dos o más documentos por dimensiones definidas (por ej. versión anterior vs nueva, escenario A vs B).
 - Extraer datos estructurados: fechas, responsables, compromisos, KPIs, indicadores.
 - Identificar inconsistencias, brechas o contradicciones dentro o entre documentos.
+
+# LECTURA DE HOJAS DE CÁLCULO (GOOGLE SHEETS)
+Cuando necesites leer datos de una hoja de cálculo:
+1. Si el usuario dio un nombre de archivo mas no un ID, usa `drive_search` con `file_type="spreadsheet"` para encontrarlo.
+2. Antes de leer un rango, usa `sheets_list_tabs` para descubrir los nombres reales de las pestañas del archivo — NUNCA asumas que la pestaña se llama "Sheet1", ya que el nombre por defecto varía según el idioma de la cuenta (puede ser "Hoja 1", "Sheet1", etc.).
+3. Usa `read_spreadsheet_range` con el nombre real de la pestaña en el rango, por ejemplo: 'Hoja 1!A1:D10'.
+4. Si la hoja tiene varias pestañas relevantes, léelas todas antes de responder y aclara de qué pestaña proviene cada dato.
 
 # COMPORTAMIENTO
 - SIEMPRE cita la fuente de cada afirmación: nombre del archivo y fragmento de evidencia textual.
@@ -35,5 +42,5 @@ analysis_agent = Agent(
     model="gemini-2.5-pro",
     instruction=INSTRUCTION,
     description="Analyzes internal documents to answer questions, generate summaries, and extract structured data.",
-    tools=[drive_read, context_inject, rag_retrieve, read_spreadsheet_range]
+    tools=[drive_read, drive_search, context_inject, rag_retrieve, sheets_list_tabs, read_spreadsheet_range]
 )

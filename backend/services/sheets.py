@@ -31,27 +31,16 @@ class SheetsService:
         return result.get('values', [])
 
     @staticmethod
-    def create_spreadsheet(title: str, credentials=None) -> str:
+    def create_spreadsheet(title: str, credentials=None) -> Dict[str, Any]:
         service = get_sheets_service(credentials)
         spreadsheet = service.spreadsheets().create(
             body={'properties': {'title': title}},
-            fields='spreadsheetId'
+            fields='spreadsheetId,sheets.properties'
         ).execute()
         spreadsheet_id = spreadsheet.get('spreadsheetId')
-
-        # Share with the user if credentials are user-owned
-        if credentials and hasattr(credentials, 'client_id'):
-            try:
-                drive = get_drive_service(credentials)
-                drive.permissions().create(
-                    fileId=spreadsheet_id,
-                    body={'type': 'anyone', 'role': 'writer'},
-                    fields='id',
-                ).execute()
-            except Exception:
-                pass
-
-        return spreadsheet_id
+        sheets = spreadsheet.get('sheets', [])
+        first_sheet_title = sheets[0]['properties']['title'] if sheets else 'Sheet1'
+        return {'spreadsheet_id': spreadsheet_id, 'first_sheet_title': first_sheet_title}
 
     @staticmethod
     def update_values(spreadsheet_id: str, range_name: str, values: List[List[Any]], credentials=None) -> bool:
@@ -63,3 +52,25 @@ class SheetsService:
             body={'values': values}
         ).execute()
         return True
+
+    @staticmethod
+    def append_values(spreadsheet_id: str, range_name: str, values: List[List[Any]], credentials=None) -> Dict[str, Any]:
+        service = get_sheets_service(credentials)
+        result = service.spreadsheets().values().append(
+            spreadsheetId=spreadsheet_id,
+            range=range_name,
+            valueInputOption='USER_ENTERED',
+            insertDataOption='INSERT_ROWS',
+            body={'values': values}
+        ).execute()
+        return result.get('updates', {})
+
+    @staticmethod
+    def share_spreadsheet(spreadsheet_id: str, email: str, credentials=None) -> None:
+        service = get_drive_service(credentials)
+        service.permissions().create(
+            fileId=spreadsheet_id,
+            body={'type': 'user', 'role': 'writer', 'emailAddress': email},
+            fields='id',
+            sendNotificationEmail=False,
+        ).execute()

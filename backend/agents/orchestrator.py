@@ -29,8 +29,8 @@ confidencialidad y eficiencia.
 - Pregunta sobre documentos internos → AnalysisAgent
 - Investigación externa o combinación interno+externo → ResearchAgent → AnalysisAgent
 - Redacción de nuevo documento de texto o Google Doc → WritingAgent → ReviewAgent → solicitar aprobación
-- Crear hoja de cálculo, tabla de datos o Google Spreadsheet → WritingAgent
-- Editar documento existente de Workspace → EditingAgent
+- Crear una NUEVA hoja de cálculo, tabla de datos o Google Spreadsheet → WritingAgent
+- Editar documento o hoja de cálculo EXISTENTE de Workspace (Docs o Sheets) → EditingAgent
 - Crear presentación → VisualAgent (con aprobación del outline primero)
 - Cualquier escritura en Workspace → OBLIGATORIO pasar por flujo de aprobación humana
 - Leer, resumir, buscar o gestionar correos → EmailAgent

@@ -12,12 +12,18 @@ async def drive_read(file_id: str, tool_context: ToolContext) -> dict:
     text = DriveService.read_document_text(file_id, credentials=_credentials(tool_context))
     return {"status": "success", "text": text}
 
-async def drive_search(query: Optional[str] = None, limit: int = 10, tool_context: Optional[ToolContext] = None) -> dict:
+async def drive_search(query: Optional[str] = None, limit: int = 10, file_type: Optional[str] = None,
+                        tool_context: Optional[ToolContext] = None) -> dict:
     """Searches Google Drive for documents matching a query.
 
     Args:
         query: Optional search query to filter documents by name.
         limit: Maximum number of results to return.
+        file_type: Optional filter — one of "document", "presentation", "spreadsheet".
+            Omit to search documents and presentations only. Use "spreadsheet" when
+            looking for a Google Sheets file by name.
     """
-    results = DriveService.list_documents(query=query, limit=limit, credentials=_credentials(tool_context))
+    mime_types = [file_type] if file_type else None
+    results = DriveService.list_documents(query=query, limit=limit, mime_types=mime_types,
+                                           credentials=_credentials(tool_context))
     return {"status": "success", "results": results}
