@@ -1,13 +1,16 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Carlito, Geist_Mono } from "next/font/google";
 import "../globals.css";
 import { NextIntlClientProvider } from 'next-intl';
 import { getMessages } from 'next-intl/server';
 import { AppShell } from "@/components/layout/AppShell";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// Carlito is metric-compatible with Calibri, the body font used throughout
+// branding/Template_Keralty.pptx — the closest freely-licensed web font match.
+const carlito = Carlito({
+  variable: "--font-carlito",
   subsets: ["latin"],
+  weight: ["400", "700"],
 });
 
 const geistMono = Geist_Mono({
@@ -32,7 +35,7 @@ export default async function RootLayout({
   
   return (
     <html lang={locale}>
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased bg-gray-50 text-gray-900`}>
+      <body className={`${carlito.variable} ${geistMono.variable} antialiased bg-gray-50 text-gray-900`}>
         <NextIntlClientProvider messages={messages} locale={locale}>
           <AppShell>{children}</AppShell>
         </NextIntlClientProvider>

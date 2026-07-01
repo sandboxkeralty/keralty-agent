@@ -10,6 +10,7 @@ import { ApprovalCard } from './ApprovalCard';
 import { DocumentPicker, DriveFile } from '../documents/DocumentPicker';
 import { VoiceChat } from './VoiceChat';
 import { useTranslations } from 'next-intl';
+import { useChatSession, ChatMessage } from '@/hooks/useChatSession';
 
 function MarkdownImage({ src, alt }: ImgHTMLAttributes<HTMLImageElement>) {
   const imgSrc = typeof src === 'string' ? src : undefined;
@@ -49,14 +50,6 @@ function MarkdownImage({ src, alt }: ImgHTMLAttributes<HTMLImageElement>) {
   );
 }
 
-export interface Message {
-  id: string;
-  role: 'user' | 'assistant';
-  content: string;
-  sources?: { title: string, url: string }[];
-  isStreaming?: boolean;
-}
-
 interface PendingTask {
   task_id: string;
   description: string;
@@ -67,7 +60,7 @@ interface PendingTask {
 
 export function ChatWindow() {
   const t = useTranslations('chat');
-  const [messages, setMessages] = useState<Message[]>([]);
+  const { sessionId, messages, setMessages, bumpHistoryRefresh } = useChatSession();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
@@ -79,21 +72,6 @@ export function ChatWindow() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
-
-  // Resume a conversation continued from the History page (see history/page.tsx's
-  // "Continuar conversación" button), which pre-seeds this key + keralty_session.
-  useEffect(() => {
-    const raw = sessionStorage.getItem('keralty_resume_messages');
-    if (raw) {
-      try {
-        setMessages(JSON.parse(raw));
-      } catch (e) {
-        console.error('Failed to parse resumed messages', e);
-      } finally {
-        sessionStorage.removeItem('keralty_resume_messages');
-      }
-    }
-  }, []);
 
   useEffect(() => {
     const poll = async () => {
@@ -167,7 +145,7 @@ export function ChatWindow() {
     e.preventDefault();
     if (!input.trim() || loading) return;
 
-    const userMessage: Message = {
+    const userMessage: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
       content: input,
@@ -183,11 +161,6 @@ export function ChatWindow() {
     try {
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
       const token = localStorage.getItem('keralty_token') || 'test-token';
-      const sessionId = (() => {
-        let sid = sessionStorage.getItem('keralty_session');
-        if (!sid) { sid = crypto.randomUUID(); sessionStorage.setItem('keralty_session', sid); }
-        return sid;
-      })();
       const response = await fetch(`${apiUrl}/api/chat`, {
         method: 'POST',
         headers: {
@@ -242,12 +215,13 @@ export function ChatWindow() {
         }
       }
       
-      setMessages(prev => prev.map(m => 
+      setMessages(prev => prev.map(m =>
         m.id === assistantId ? { ...m, isStreaming: false } : m
       ));
+      bumpHistoryRefresh();
     } catch (err) {
       console.error(err);
-      setMessages(prev => prev.map(m => 
+      setMessages(prev => prev.map(m =>
         m.id === assistantId ? { ...m, content: 'Error communicating with the assistant.', isStreaming: false } : m
       ));
     } finally {

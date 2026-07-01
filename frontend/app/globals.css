@@ -1,39 +1,41 @@
 @import "tailwindcss";
 
 @theme {
-  --color-primary: #009C8A;
-  --color-primary-dark: #007A6C;
-  --color-primary-light: #E6F7F5;
+  /* Keralty brand palette — from branding/Paleta de colores Keralty.xlsx
+     and the navy used throughout branding/Template_Keralty.pptx (#002060). */
+  --color-primary: #00B288;        /* Pantone 339C */
+  --color-primary-dark: #007D5F;
+  --color-primary-light: #E5F7F4;
 
-  --color-navy: #1B3468;
-  --color-navy-dark: #132552;
-  --color-navy-light: #EEF1F8;
+  --color-navy: #002060;           /* matches Template_Keralty.pptx headings */
+  --color-navy-dark: #001848;
+  --color-navy-light: #E8EEF7;
 
   --color-white: #FFFFFF;
   --color-background: #F8FAFB;
   --color-surface: #FFFFFF;
   --color-border: #E2E8F0;
-  
+
   --color-text-primary: #1A2E44;
   --color-text-secondary: #4A6580;
   --color-text-muted: #94A3B8;
 
-  --color-success: #2E9E6B;
-  --color-success-light: #E8F5EE;
-  
+  --color-success: #4E9D2D;        /* Pantone 362C */
+  --color-success-light: #EEF6E8;
+
   --color-warning: #D97706;
   --color-warning-light: #FEF3C7;
-  
+
   --color-error: #DC2626;
   --color-error-light: #FEE2E2;
-  
-  --color-info: #2563EB;
-  --color-info-light: #EFF6FF;
+
+  --color-info: #0071CE;           /* Pantone 285C */
+  --color-info-light: #E6F1FB;
 
   --color-agent-thinking: #7C3AED;
   --color-agent-light: #F3EFFE;
 
-  --font-family-base: 'Inter', system-ui, sans-serif;
+  --font-family-base: var(--font-carlito), 'Calibri', system-ui, sans-serif;
   --font-family-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
   --text-xs: 0.75rem;

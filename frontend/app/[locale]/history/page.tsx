@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Clock, MessageSquare, ChevronRight, Loader2, MessageCirclePlus } from 'lucide-react';
+import { useChatSession, ChatMessage } from '@/hooks/useChatSession';
 
 interface SessionSummary {
   session_id: string;
@@ -20,6 +21,7 @@ interface SessionDetail {
 
 export default function HistoryPage() {
   const router = useRouter();
+  const { loadSession } = useChatSession();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<SessionDetail | null>(null);
@@ -47,7 +49,7 @@ export default function HistoryPage() {
     load();
   }, []);
 
-  const loadSession = async (sessionId: string) => {
+  const loadSessionDetail = async (sessionId: string) => {
     setDetailLoading(true);
     try {
       const res = await fetch(`${apiUrl}/history/${sessionId}`, {
@@ -68,13 +70,12 @@ export default function HistoryPage() {
 
   const handleContinue = () => {
     if (!selected) return;
-    const resumedMessages = selected.messages.map((m, i) => ({
+    const resumedMessages: ChatMessage[] = selected.messages.map((m, i) => ({
       id: `resumed-${i}`,
       role: m.role === 'user' ? 'user' : 'assistant',
       content: m.content,
     }));
-    sessionStorage.setItem('keralty_session', selected.session.session_id);
-    sessionStorage.setItem('keralty_resume_messages', JSON.stringify(resumedMessages));
+    loadSession(selected.session.session_id, resumedMessages);
     router.push('/');
   };
 
@@ -97,7 +98,7 @@ export default function HistoryPage() {
             sessions.map(s => (
               <button
                 key={s.session_id}
-                onClick={() => loadSession(s.session_id)}
+                onClick={() => loadSessionDetail(s.session_id)}
                 className={`w-full text-left bg-white border rounded-[12px] p-4 shadow-sm hover:border-[var(--color-primary)] transition-colors flex items-start gap-3 ${selected?.session.session_id === s.session_id ? 'border-[var(--color-primary)] ring-1 ring-[var(--color-primary)]/30' : 'border-[var(--color-border)]'}`}
               >
                 <MessageSquare className="h-4 w-4 mt-0.5 shrink-0 text-[var(--color-primary)]" />
