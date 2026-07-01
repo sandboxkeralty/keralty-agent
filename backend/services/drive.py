@@ -12,6 +12,7 @@ def get_drive_service(credentials=None):
 _DEFAULT_MIME_TYPES = [
     'application/vnd.google-apps.document',
     'application/vnd.google-apps.presentation',
+    'application/vnd.google-apps.spreadsheet',
 ]
 _MIME_TYPE_ALIASES = {
     'document': 'application/vnd.google-apps.document',
