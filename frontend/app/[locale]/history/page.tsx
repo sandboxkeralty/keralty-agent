@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useEffect, useState } from 'react';
-import { Clock, MessageSquare, ChevronRight, Loader2 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Clock, MessageSquare, ChevronRight, Loader2, MessageCirclePlus } from 'lucide-react';
 
 interface SessionSummary {
   session_id: string;
@@ -18,6 +19,7 @@ interface SessionDetail {
 }
 
 export default function HistoryPage() {
+  const router = useRouter();
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<SessionDetail | null>(null);
@@ -63,6 +65,18 @@ export default function HistoryPage() {
 
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleString('es-ES', { dateStyle: 'short', timeStyle: 'short' });
+
+  const handleContinue = () => {
+    if (!selected) return;
+    const resumedMessages = selected.messages.map((m, i) => ({
+      id: `resumed-${i}`,
+      role: m.role === 'user' ? 'user' : 'assistant',
+      content: m.content,
+    }));
+    sessionStorage.setItem('keralty_session', selected.session.session_id);
+    sessionStorage.setItem('keralty_resume_messages', JSON.stringify(resumedMessages));
+    router.push('/');
+  };
 
   return (
     <div className="p-6 max-w-5xl mx-auto w-full">
@@ -112,9 +126,17 @@ export default function HistoryPage() {
             </div>
           ) : selected ? (
             <div className="flex flex-col h-full max-h-[600px]">
-              <div className="px-4 py-3 border-b border-[var(--color-border)] bg-[var(--color-background)]">
-                <p className="font-semibold text-sm text-[var(--color-navy)] truncate">{selected.session.title}</p>
-                <p className="text-xs text-[var(--color-text-muted)]">{formatDate(selected.session.created_at)}</p>
+              <div className="px-4 py-3 border-b border-[var(--color-border)] bg-[var(--color-background)] flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold text-sm text-[var(--color-navy)] truncate">{selected.session.title}</p>
+                  <p className="text-xs text-[var(--color-text-muted)]">{formatDate(selected.session.created_at)}</p>
+                </div>
+                <button
+                  onClick={handleContinue}
+                  className="flex items-center gap-1.5 shrink-0 text-xs font-medium px-3 py-1.5 bg-[var(--color-primary)] text-white rounded-[6px] hover:bg-[var(--color-primary-dark)] transition-colors"
+                >
+                  <MessageCirclePlus className="h-3.5 w-3.5" /> Continuar conversación
+                </button>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
                 {selected.messages.map((m, i) => (

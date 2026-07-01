@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Paperclip, X } from 'lucide-react';
+import type { ImgHTMLAttributes } from 'react';
+import { Send, Bot, User, Paperclip, X, Download } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { SourceChip } from './SourceChip';
@@ -9,6 +10,44 @@ import { ApprovalCard } from './ApprovalCard';
 import { DocumentPicker, DriveFile } from '../documents/DocumentPicker';
 import { VoiceChat } from './VoiceChat';
 import { useTranslations } from 'next-intl';
+
+function MarkdownImage({ src, alt }: ImgHTMLAttributes<HTMLImageElement>) {
+  const imgSrc = typeof src === 'string' ? src : undefined;
+
+  const handleDownload = async () => {
+    if (!imgSrc) return;
+    try {
+      const res = await fetch(imgSrc);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = (typeof alt === 'string' && alt.trim()) || 'imagen-generada.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(blobUrl);
+    } catch (e) {
+      console.error('Image download failed', e);
+      window.open(imgSrc, '_blank');
+    }
+  };
+
+  return (
+    <span className="relative inline-block group my-1 max-w-full">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={imgSrc} alt={typeof alt === 'string' ? alt : ''} className="max-w-full rounded-lg border border-[var(--color-border)]" />
+      <button
+        type="button"
+        onClick={handleDownload}
+        title="Descargar imagen"
+        className="absolute top-2 right-2 p-1.5 bg-white/90 rounded-full shadow hover:bg-white transition-colors opacity-0 group-hover:opacity-100"
+      >
+        <Download size={14} className="text-[var(--color-navy)]" />
+      </button>
+    </span>
+  );
+}
 
 export interface Message {
   id: string;
@@ -40,6 +79,21 @@ export function ChatWindow() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Resume a conversation continued from the History page (see history/page.tsx's
+  // "Continuar conversación" button), which pre-seeds this key + keralty_session.
+  useEffect(() => {
+    const raw = sessionStorage.getItem('keralty_resume_messages');
+    if (raw) {
+      try {
+        setMessages(JSON.parse(raw));
+      } catch (e) {
+        console.error('Failed to parse resumed messages', e);
+      } finally {
+        sessionStorage.removeItem('keralty_resume_messages');
+      }
+    }
+  }, []);
 
   useEffect(() => {
     const poll = async () => {
@@ -212,7 +266,7 @@ export function ChatWindow() {
             <div className={`flex flex-col gap-2 ${m.role === 'user' ? 'items-end' : 'items-start'}`}>
               <div className={`px-4 py-3 rounded-[12px] text-sm ${m.role === 'user' ? 'bg-[var(--color-navy)] text-white' : 'bg-white border border-[var(--color-border)] text-[var(--color-text-primary)] shadow-sm'}`}>
                 <div className="[&_a]:text-blue-600 [&_a]:underline [&_a:hover]:text-blue-800 [&_h1]:text-base [&_h1]:font-bold [&_h1]:mb-1 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mb-1 [&_h3]:text-sm [&_h3]:font-semibold [&_p]:mb-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:mb-0.5 [&_table]:border-collapse [&_table]:w-full [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-gray-200 [&_th]:px-2 [&_th]:py-1 [&_th]:bg-gray-50 [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:rounded [&_blockquote]:border-l-2 [&_blockquote]:border-gray-300 [&_blockquote]:pl-2 [&_blockquote]:italic">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{m.content}</ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: MarkdownImage }}>{m.content}</ReactMarkdown>
                 </div>
                 {m.isStreaming && <span className="inline-block w-1 h-4 ml-1 bg-current animate-pulse align-middle" />}
               </div>
