@@ -58,6 +58,20 @@ class Settings(BaseSettings):
     KB_INDEX_ENDPOINT: Optional[str] = None
     KB_MAX_RESULTS: int = 10
 
+    # RAG pipeline knobs (E1-E10 guardrails)
+    RAG_CHUNK_TARGET_TOKENS: int = 800
+    RAG_CHUNK_MAX_TOKENS: int = 1000
+    RAG_CHUNK_OVERLAP_PCT: float = 0.15
+    RAG_CHUNK_MIN_TOKENS: int = 120
+    RAG_K_DENSE: int = 30
+    RAG_K_SPARSE: int = 30
+    RAG_K_FUSED: int = 20
+    RAG_RERANK_TOP_K: int = 8
+    RAG_REWRITE_COUNT: int = 3
+    RAG_NEIGHBOR_WINDOW: int = 1
+    RAG_ABSTAIN_THRESHOLD: float = 0.5
+    RAG_EMBED_MODEL: str = "text-embedding-005"
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 settings = Settings()

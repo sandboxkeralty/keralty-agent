@@ -1,4 +1,6 @@
 import json
+import uuid
+from datetime import datetime, timezone
 from fastapi import APIRouter, Request as FastAPIRequest
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -6,6 +8,7 @@ from typing import Optional
 from google.genai import types
 from agents.runner import runner
 from services.firestore import FirestoreService
+from models.schemas import SessionInDB, MessageInDB
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
@@ -13,6 +16,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = "default-session"
     user_id: Optional[str] = "default-user"
+    attached_context: Optional[str] = None  # text content of an attached Drive document
 
 @router.post("")
 async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
@@ -34,17 +38,52 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                     user_id=user_id,
                 )
                 if session is None:
+                    init_state = {"user_id": user_id}
+                    if creds_dict:
+                        init_state["google_credentials"] = creds_dict
                     await runner.session_service.create_session(
                         app_name="agents",
                         user_id=user_id,
                         session_id=body.session_id,
-                        state={"google_credentials": creds_dict} if creds_dict else {},
+                        state=init_state,
                     )
+                    # Persist session metadata to Firestore for history page
+                    try:
+                        now = datetime.now(timezone.utc)
+                        FirestoreService.create_session(SessionInDB(
+                            session_id=body.session_id,
+                            user_id=user_id,
+                            title=body.message[:80],
+                            created_at=now,
+                            updated_at=now,
+                        ))
+                    except Exception:
+                        pass
                 elif creds_dict:
                     session.state["google_credentials"] = creds_dict
+                    session.state["user_id"] = user_id
+
+                # Inject attached document context into session state
+                if body.attached_context and session:
+                    existing = session.state.get("attached_documents", [])
+                    existing.append(body.attached_context[:8000])  # cap per-doc size
+                    session.state["attached_documents"] = existing
             except Exception as e:
                 print(f"Session error: {e}")
 
+            # Persist user message
+            try:
+                FirestoreService.add_message(MessageInDB(
+                    message_id=str(uuid.uuid4()),
+                    session_id=body.session_id,
+                    role="user",
+                    content=body.message,
+                    timestamp=datetime.now(timezone.utc),
+                ))
+            except Exception:
+                pass
+
+            full_response = ""
             async for event in runner.run_async(
                 new_message=types.Content(role="user", parts=[types.Part.from_text(text=body.message)]),
                 session_id=body.session_id,
@@ -62,10 +101,25 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                                 text += p.text
 
                     if text:
+                        full_response += text
                         yield f"data: {json.dumps({'type': 'content', 'text': text})}\n\n"
 
                 if event.is_final_response():
                     yield f"data: {json.dumps({'type': 'final'})}\n\n"
+
+            # Persist agent response
+            if full_response:
+                try:
+                    FirestoreService.add_message(MessageInDB(
+                        message_id=str(uuid.uuid4()),
+                        session_id=body.session_id,
+                        role="agent",
+                        content=full_response,
+                        timestamp=datetime.now(timezone.utc),
+                    ))
+                except Exception:
+                    pass
+
         except Exception as e:
             print(f"Error in streaming: {e}")
             yield f"data: {json.dumps({'type': 'content', 'text': f'An error occurred: {str(e)}'})}\n\n"

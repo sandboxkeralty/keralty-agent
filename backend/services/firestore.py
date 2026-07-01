@@ -89,3 +89,36 @@ class FirestoreService:
         if doc.exists:
             return doc.to_dict().get("google_credentials")
         return None
+
+    @staticmethod
+    def list_users(limit: int = 100) -> List[dict]:
+        docs = db.collection("users").limit(limit).stream()
+        result = []
+        for doc in docs:
+            d = doc.to_dict()
+            d.pop("google_credentials", None)  # never expose tokens
+            result.append(d)
+        return result
+
+    @staticmethod
+    def get_metrics() -> dict:
+        session_count = sum(1 for _ in db.collection("sessions").stream())
+        message_count = sum(1 for _ in db.collection("messages").stream())
+        audit_count   = sum(1 for _ in db.collection("audit_events").stream())
+        user_count    = sum(1 for _ in db.collection("users").stream())
+        return {
+            "users": user_count,
+            "sessions": session_count,
+            "messages": message_count,
+            "audit_events": audit_count,
+        }
+
+    @staticmethod
+    def get_audit_logs(limit: int = 50) -> List[dict]:
+        docs = (
+            db.collection("audit_events")
+            .order_by("timestamp", direction=firestore.Query.DESCENDING)
+            .limit(limit)
+            .stream()
+        )
+        return [doc.to_dict() for doc in docs]

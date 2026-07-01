@@ -1,10 +1,13 @@
 "use client";
 
 import { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User } from 'lucide-react';
+import { Send, Bot, User, Paperclip, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { SourceChip } from './SourceChip';
+import { ApprovalCard } from './ApprovalCard';
+import { DocumentPicker, DriveFile } from '../documents/DocumentPicker';
+import { VoiceChat } from './VoiceChat';
 import { useTranslations } from 'next-intl';
 
 export interface Message {
@@ -15,16 +18,96 @@ export interface Message {
   isStreaming?: boolean;
 }
 
+interface PendingTask {
+  task_id: string;
+  description: string;
+  document_id: string;
+  changes_summary: string;
+  type: string;
+}
+
 export function ChatWindow() {
   const t = useTranslations('chat');
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
+  const [showPicker, setShowPicker] = useState(false);
+  const [attachedDoc, setAttachedDoc] = useState<{ file: DriveFile; text: string } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+        const token = localStorage.getItem('keralty_token') || 'test-token';
+        const res = await fetch(`${apiUrl}/api/tasks`, {
+          headers: { 'Authorization': `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const tasks: PendingTask[] = await res.json();
+          setPendingTasks(tasks);
+        }
+      } catch {
+        // ignore polling errors
+      }
+    };
+    poll();
+    const interval = setInterval(poll, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleApprove = async (taskId: string, documentId: string) => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const token = localStorage.getItem('keralty_token') || 'test-token';
+    await fetch(`${apiUrl}/api/tasks/${taskId}/approve`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    setPendingTasks(prev => prev.filter(t => t.task_id !== taskId));
+    // Auto-send approval message so the agent can continue
+    setInput(`[APROBADO] task_id=${taskId} — procede con la operación para el documento ${documentId}`);
+    setTimeout(() => {
+      document.querySelector<HTMLFormElement>('form')?.requestSubmit();
+    }, 100);
+  };
+
+  const handleSelectDoc = async (file: DriveFile) => {
+    setShowPicker(false);
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const token = localStorage.getItem('keralty_token') || 'test-token';
+      const res = await fetch(`${apiUrl}/documents/${file.id}/text`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAttachedDoc({ file, text: data.text });
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleTranscript = (text: string) => {
+    setInput(text);
+    setTimeout(() => formRef.current?.requestSubmit(), 80);
+  };
+
+  const handleReject = async (taskId: string) => {
+    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+    const token = localStorage.getItem('keralty_token') || 'test-token';
+    await fetch(`${apiUrl}/api/tasks/${taskId}/reject`, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    setPendingTasks(prev => prev.filter(t => t.task_id !== taskId));
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,7 +140,11 @@ export function ChatWindow() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify({ message: userMessage.content, session_id: sessionId }),
+        body: JSON.stringify({
+          message: userMessage.content,
+          session_id: sessionId,
+          ...(attachedDoc ? { attached_context: attachedDoc.text } : {}),
+        }),
       });
 
       if (!response.body) throw new Error('No readable stream');
@@ -115,7 +202,7 @@ export function ChatWindow() {
   };
 
   return (
-    <div className="flex flex-col h-full bg-[var(--color-background)] rounded-lg shadow-sm border border-[var(--color-border)]">
+    <div className="relative flex flex-col h-full bg-[var(--color-background)] rounded-lg shadow-sm border border-[var(--color-border)]">
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map(m => (
           <div key={m.id} className={`flex gap-3 max-w-[80%] ${m.role === 'user' ? 'ml-auto flex-row-reverse' : ''}`}>
@@ -141,24 +228,67 @@ export function ChatWindow() {
         ))}
         <div ref={bottomRef} />
       </div>
-      <form onSubmit={handleSubmit} className="p-4 border-t border-[var(--color-border)] bg-white">
-        <div className="relative flex items-center">
-          <input
-            type="text"
-            className="w-full pl-4 pr-12 py-3 rounded-full border border-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 text-sm"
-            placeholder={t('placeholder')}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            disabled={loading}
-          />
-          <button
-            type="submit"
-            disabled={!input.trim() || loading}
-            className="absolute right-2 p-2 rounded-full bg-[var(--color-primary)] text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--color-primary-dark)] transition-colors"
-          >
-            <Send size={16} />
-          </button>
+      {pendingTasks.length > 0 && (
+        <div className="px-4 pb-2 space-y-2">
+          {pendingTasks.map(task => (
+            <ApprovalCard
+              key={task.task_id}
+              title={task.description}
+              documentId={task.document_id}
+              diff={task.changes_summary}
+              onApprove={() => handleApprove(task.task_id, task.document_id)}
+              onReject={() => handleReject(task.task_id)}
+            />
+          ))}
         </div>
+      )}
+      <form ref={formRef} onSubmit={handleSubmit} className="p-4 border-t border-[var(--color-border)] bg-white">
+        {attachedDoc && (
+          <div className="flex items-center gap-2 mb-2 px-1">
+            <span className="flex items-center gap-1.5 text-xs bg-[var(--color-primary-light)] text-[var(--color-navy)] px-2 py-1 rounded-full border border-[var(--color-primary)]/30">
+              <Paperclip size={11} />
+              {attachedDoc.file.name}
+              <button type="button" onClick={() => setAttachedDoc(null)} className="ml-1 hover:text-red-500">
+                <X size={11} />
+              </button>
+            </span>
+          </div>
+        )}
+        <div className="relative flex items-center gap-2">
+          <div className="relative flex-1 flex items-center">
+            <button
+              type="button"
+              onClick={() => setShowPicker(p => !p)}
+              className="absolute left-3 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] transition-colors z-10"
+              title="Adjuntar documento"
+            >
+              <Paperclip size={16} />
+            </button>
+            <input
+              type="text"
+              className="w-full pl-10 pr-20 py-3 rounded-full border border-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 text-sm"
+              placeholder={t('placeholder')}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              disabled={loading}
+            />
+            <div className="absolute right-2 flex items-center gap-1">
+              <VoiceChat onTranscript={handleTranscript} />
+              <button
+                type="submit"
+                disabled={!input.trim() || loading}
+                className="p-2 rounded-full bg-[var(--color-primary)] text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--color-primary-dark)] transition-colors"
+              >
+                <Send size={16} />
+              </button>
+            </div>
+          </div>
+        </div>
+        {showPicker && (
+          <div className="absolute bottom-20 left-4 z-50 shadow-xl rounded-[12px] overflow-hidden">
+            <DocumentPicker onSelect={handleSelectDoc} />
+          </div>
+        )}
       </form>
     </div>
   );

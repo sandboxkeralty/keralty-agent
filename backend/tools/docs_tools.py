@@ -1,7 +1,26 @@
+import uuid
+import hashlib
+from datetime import datetime, timezone
 from google.adk.tools import ToolContext
 from services.docs import DocsService
+from services.firestore import FirestoreService
+from models.schemas import AuditEvent
 from tools._auth import _credentials
 from typing import Optional
+
+def _audit(tool_context, action: str, resource_type: str, resource_id: str):
+    try:
+        user_id = getattr(getattr(tool_context, "session", None), "user_id", None) or ""
+        FirestoreService.log_audit_event(AuditEvent(
+            event_id=str(uuid.uuid4()),
+            user_email_hash=hashlib.sha256(user_id.encode()).hexdigest(),
+            action=action,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            timestamp=datetime.now(timezone.utc),
+        ))
+    except Exception:
+        pass
 
 async def docs_get(document_id: str, tool_context: ToolContext) -> dict:
     """Gets the content of a Google Doc.
@@ -34,6 +53,7 @@ async def docs_update(document_id: str, content: str, tool_context: ToolContext)
         creds = _credentials(tool_context)
         DocsService.append_text(document_id, content, credentials=creds)
         url = f"https://docs.google.com/document/d/{document_id}/edit"
+        _audit(tool_context, "docs_update", "document", document_id)
         return {"status": "success", "document_id": document_id, "url": url,
                 "message": "Content written to document successfully."}
     except Exception as e:
@@ -67,6 +87,7 @@ async def docs_create(title: str, tool_context: ToolContext, content: Optional[s
         except Exception:
             pass
 
+        _audit(tool_context, "docs_create", "document", doc_id)
         return {"status": "success", "document_id": doc_id, "url": url,
                 "message": f"Document '{title}' created successfully."}
     except Exception as e:

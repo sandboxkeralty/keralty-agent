@@ -11,7 +11,8 @@ async def approval_create(task_description: str, document_id: str, changes_summa
         changes_summary: Summary of changes to be applied.
     """
     task_id = str(uuid.uuid4())
-    user_id = getattr(tool_context, "session", None).user_id if getattr(tool_context, "session", None) else "sandbox-user"
+    state = getattr(tool_context, "state", {}) if tool_context else {}
+    user_id = state.get("user_id") or "sandbox-user"
     
     FirestoreService.create_task(task_id, {
         "type": "generic_approval",

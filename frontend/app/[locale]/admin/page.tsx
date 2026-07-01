@@ -1,7 +1,106 @@
-import React from 'react';
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { Users, BarChart2, ShieldCheck, Settings, Loader2, RefreshCw, BookOpen, Upload, Trash2, FileText, CheckCircle } from "lucide-react";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const getToken = () =>
+  typeof window !== "undefined" ? localStorage.getItem("keralty_token") || "test-token" : "test-token";
+
+async function apiFetch(path: string) {
+  const res = await fetch(`${API_URL}${path}`, {
+    headers: { Authorization: `Bearer ${getToken()}` },
+  });
+  if (!res.ok) throw new Error(`${res.status}`);
+  return res.json();
+}
+
+interface UserRecord {
+  user_id: string;
+  email?: string;
+  name?: string;
+  picture?: string;
+  role?: string;
+  updated_at?: string;
+}
+
+interface Metrics {
+  users: number;
+  sessions: number;
+  messages: number;
+  audit_events: number;
+}
+
+interface AuditEntry {
+  event_id: string;
+  user_email_hash: string;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  timestamp: string;
+}
+
+interface Configs {
+  [key: string]: boolean | string;
+}
+
+interface KBDoc {
+  doc_id: string;
+  filename: string;
+  filetype: string;
+  chunk_count: number;
+  ingested_at: string;
+  status: string;
+  gcs_path: string;
+}
+
+type Tab = "metrics" | "users" | "audit" | "kb" | "config";
 
 export default function AdminPage() {
-  const adminEnabled = process.env.NEXT_PUBLIC_ADMIN_ENABLED === 'true';
+  const adminEnabled = process.env.NEXT_PUBLIC_ADMIN_ENABLED === "true";
+
+  const [tab, setTab] = useState<Tab>("metrics");
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [metrics, setMetrics] = useState<Metrics | null>(null);
+  const [audit, setAudit] = useState<AuditEntry[]>([]);
+  const [configs, setConfigs] = useState<Configs>({});
+  const [kbDocs, setKbDocs] = useState<KBDoc[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = async (t: Tab) => {
+    setLoading(true);
+    setError("");
+    try {
+      if (t === "users") {
+        const data = await apiFetch("/admin/users");
+        setUsers(data.users || []);
+      } else if (t === "metrics") {
+        const data = await apiFetch("/admin/metrics");
+        setMetrics(data.metrics);
+      } else if (t === "audit") {
+        const data = await apiFetch("/admin/audit?limit=50");
+        setAudit(data.logs || []);
+      } else if (t === "kb") {
+        const data = await apiFetch("/knowledge/documents");
+        setKbDocs(data.documents || []);
+      } else if (t === "config") {
+        const data = await apiFetch("/admin/configs");
+        setConfigs(data.configs || {});
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Error cargando datos");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (adminEnabled) load(tab);
+  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!adminEnabled) {
     return (
@@ -12,26 +111,351 @@ export default function AdminPage() {
     );
   }
 
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setUploadMsg("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch(`${API_URL}/knowledge/documents`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${getToken()}` },
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || "Upload failed");
+      setUploadMsg(`✓ ${data.filename} — ${data.chunk_count} chunks indexados`);
+      load("kb");
+    } catch (err: unknown) {
+      setUploadMsg(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const handleDeleteDoc = async (docId: string) => {
+    try {
+      await fetch(`${API_URL}/knowledge/documents/${docId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      setKbDocs((prev) => prev.filter((d) => d.doc_id !== docId));
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const tabs: { id: Tab; label: string; Icon: typeof Users }[] = [
+    { id: "metrics", label: "Métricas", Icon: BarChart2 },
+    { id: "users", label: "Usuarios", Icon: Users },
+    { id: "kb", label: "Knowledge Base", Icon: BookOpen },
+    { id: "audit", label: "Auditoría", Icon: ShieldCheck },
+    { id: "config", label: "Configuración", Icon: Settings },
+  ];
+
   return (
-    <div className="p-8 max-w-6xl mx-auto w-full">
-      <h1 className="text-2xl font-bold text-[var(--color-navy)] mb-6">Panel de Administración</h1>
-      
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm p-6">
-          <h2 className="text-lg font-semibold mb-4 text-[var(--color-primary)]">Gestión de Usuarios</h2>
-          <p className="text-[var(--color-text-muted)]">Cargando usuarios...</p>
-        </div>
-
-        <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm p-6">
-          <h2 className="text-lg font-semibold mb-4 text-[var(--color-primary)]">Métricas de Uso</h2>
-          <p className="text-[var(--color-text-muted)]">Cargando métricas...</p>
-        </div>
-
-        <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm p-6 md:col-span-2">
-          <h2 className="text-lg font-semibold mb-4 text-[var(--color-primary)]">Base de Conocimiento (KB)</h2>
-          <p className="text-[var(--color-text-muted)]">Cargando documentos de la organización...</p>
-        </div>
+    <div className="p-6 max-w-6xl mx-auto w-full">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold text-[var(--color-navy)]">Panel de Administración</h1>
+        <button
+          onClick={() => load(tab)}
+          className="flex items-center gap-2 text-sm px-3 py-2 text-[var(--color-primary)] hover:bg-[var(--color-primary-light)] rounded-[8px] transition-colors"
+        >
+          <RefreshCw size={15} /> Actualizar
+        </button>
       </div>
+
+      {/* Tab bar */}
+      <div className="flex gap-1 border-b border-[var(--color-border)] mb-6">
+        {tabs.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            className={`flex items-center gap-2 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              tab === id
+                ? "border-[var(--color-primary)] text-[var(--color-primary)]"
+                : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-navy)]"
+            }`}
+          >
+            <Icon size={15} /> {label}
+          </button>
+        ))}
+      </div>
+
+      {/* Loading / error */}
+      {loading && (
+        <div className="flex items-center gap-2 text-[var(--color-text-muted)] text-sm py-8 justify-center">
+          <Loader2 size={16} className="animate-spin" /> Cargando...
+        </div>
+      )}
+      {error && (
+        <div className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-[8px] px-4 py-3 mb-4">
+          Error: {error}
+        </div>
+      )}
+
+      {/* ── Metrics ── */}
+      {!loading && tab === "metrics" && metrics && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { label: "Usuarios", value: metrics.users, color: "text-[var(--color-primary)]" },
+            { label: "Sesiones", value: metrics.sessions, color: "text-[var(--color-navy)]" },
+            { label: "Mensajes", value: metrics.messages, color: "text-green-600" },
+            { label: "Eventos de auditoría", value: metrics.audit_events, color: "text-orange-500" },
+          ].map((m) => (
+            <div
+              key={m.label}
+              className="bg-white border border-[var(--color-border)] rounded-[12px] p-5 shadow-sm text-center"
+            >
+              <p className={`text-4xl font-bold ${m.color}`}>{m.value}</p>
+              <p className="text-xs text-[var(--color-text-muted)] uppercase mt-1">{m.label}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* ── Users ── */}
+      {!loading && tab === "users" && (
+        <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm overflow-hidden">
+          {users.length === 0 ? (
+            <p className="p-8 text-center text-[var(--color-text-muted)] text-sm">Sin usuarios registrados.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-[var(--color-background)] border-b border-[var(--color-border)]">
+                <tr>
+                  {["Usuario", "Email", "Rol", "Última actividad"].map((h) => (
+                    <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-[var(--color-text-muted)] uppercase">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--color-border)]">
+                {users.map((u) => (
+                  <tr key={u.user_id} className="hover:bg-[var(--color-background)] transition-colors">
+                    <td className="px-4 py-3 flex items-center gap-2">
+                      {u.picture ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={u.picture} alt="" className="w-7 h-7 rounded-full" />
+                      ) : (
+                        <div className="w-7 h-7 rounded-full bg-[var(--color-primary-light)] flex items-center justify-center text-xs font-bold text-[var(--color-primary)]">
+                          {(u.name || u.email || "?")[0].toUpperCase()}
+                        </div>
+                      )}
+                      <span className="font-medium text-[var(--color-navy)]">{u.name || "—"}</span>
+                    </td>
+                    <td className="px-4 py-3 text-[var(--color-text-muted)]">{u.email || u.user_id}</td>
+                    <td className="px-4 py-3">
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        u.role === "admin"
+                          ? "bg-[var(--color-primary-light)] text-[var(--color-primary)]"
+                          : "bg-gray-100 text-gray-600"
+                      }`}>
+                        {u.role || "user"}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-[var(--color-text-muted)]">
+                      {u.updated_at
+                        ? new Date(u.updated_at).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })
+                        : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* ── Audit log ── */}
+      {!loading && tab === "audit" && (
+        <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm overflow-hidden">
+          {audit.length === 0 ? (
+            <p className="p-8 text-center text-[var(--color-text-muted)] text-sm">Sin eventos de auditoría.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="bg-[var(--color-background)] border-b border-[var(--color-border)]">
+                <tr>
+                  {["Fecha", "Acción", "Tipo", "Recurso", "Usuario (hash)"].map((h) => (
+                    <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-[var(--color-text-muted)] uppercase">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--color-border)]">
+                {audit.map((e) => (
+                  <tr key={e.event_id} className="hover:bg-[var(--color-background)] transition-colors">
+                    <td className="px-4 py-2.5 text-[var(--color-text-muted)] whitespace-nowrap">
+                      {new Date(e.timestamp).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <ActionBadge action={e.action} />
+                    </td>
+                    <td className="px-4 py-2.5 text-[var(--color-text-muted)]">{e.resource_type}</td>
+                    <td className="px-4 py-2.5 font-mono text-xs text-[var(--color-text-muted)] max-w-[180px] truncate">
+                      {e.resource_id}
+                    </td>
+                    <td className="px-4 py-2.5 font-mono text-xs text-[var(--color-text-muted)]">
+                      {e.user_email_hash.slice(0, 12)}…
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+
+      {/* ── Knowledge Base ── */}
+      {!loading && tab === "kb" && (
+        <div className="space-y-4">
+          {/* Upload card */}
+          <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm p-5">
+            <h3 className="font-semibold text-[var(--color-navy)] mb-3 flex items-center gap-2">
+              <Upload size={16} /> Subir documento
+            </h3>
+            <p className="text-xs text-[var(--color-text-muted)] mb-3">
+              Formatos admitidos: PDF, DOCX, TXT, CSV, MD — máx. 50 MB
+            </p>
+            <div className="flex items-center gap-3">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.docx,.doc,.txt,.csv,.md"
+                onChange={handleUpload}
+                className="hidden"
+                id="kb-file-input"
+              />
+              <label
+                htmlFor="kb-file-input"
+                className={`flex items-center gap-2 px-4 py-2 rounded-[8px] text-sm font-medium cursor-pointer transition-colors ${
+                  uploading
+                    ? "bg-gray-200 text-gray-500 cursor-not-allowed"
+                    : "bg-[var(--color-primary)] text-white hover:bg-[var(--color-primary-dark)]"
+                }`}
+              >
+                {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+                {uploading ? "Procesando..." : "Seleccionar archivo"}
+              </label>
+              {uploadMsg && (
+                <span className={`text-sm flex items-center gap-1 ${uploadMsg.startsWith("✓") ? "text-green-600" : "text-red-600"}`}>
+                  {uploadMsg.startsWith("✓") && <CheckCircle size={14} />}
+                  {uploadMsg}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Document list */}
+          <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm overflow-hidden">
+            <div className="px-5 py-3 border-b border-[var(--color-border)] flex items-center justify-between">
+              <h3 className="font-semibold text-[var(--color-navy)] flex items-center gap-2">
+                <FileText size={15} /> Documentos indexados ({kbDocs.length})
+              </h3>
+            </div>
+            {kbDocs.length === 0 ? (
+              <p className="p-8 text-center text-[var(--color-text-muted)] text-sm">
+                No hay documentos en la Knowledge Base. Sube el primero arriba.
+              </p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="bg-[var(--color-background)] border-b border-[var(--color-border)]">
+                  <tr>
+                    {["Archivo", "Tipo", "Chunks", "Indexado", ""].map((h) => (
+                      <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-[var(--color-text-muted)] uppercase">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[var(--color-border)]">
+                  {kbDocs.map((doc) => (
+                    <tr key={doc.doc_id} className="hover:bg-[var(--color-background)] transition-colors">
+                      <td className="px-4 py-3 font-medium text-[var(--color-navy)]">{doc.filename}</td>
+                      <td className="px-4 py-3">
+                        <span className="text-xs px-2 py-0.5 rounded-full bg-[var(--color-primary-light)] text-[var(--color-primary)] font-medium uppercase">
+                          {doc.filetype}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-[var(--color-text-muted)]">{doc.chunk_count}</td>
+                      <td className="px-4 py-3 text-[var(--color-text-muted)]">
+                        {doc.ingested_at
+                          ? new Date(doc.ingested_at).toLocaleString("es-ES", { dateStyle: "short", timeStyle: "short" })
+                          : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <button
+                          onClick={() => handleDeleteDoc(doc.doc_id)}
+                          className="p-1.5 rounded text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                          title="Eliminar documento"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Config ── */}
+      {!loading && tab === "config" && (
+        <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-[var(--color-background)] border-b border-[var(--color-border)]">
+              <tr>
+                {["Variable", "Valor"].map((h) => (
+                  <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-[var(--color-text-muted)] uppercase">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--color-border)]">
+              {Object.entries(configs).map(([key, val]) => (
+                <tr key={key} className="hover:bg-[var(--color-background)] transition-colors">
+                  <td className="px-4 py-2.5 font-mono text-xs text-[var(--color-navy)]">{key}</td>
+                  <td className="px-4 py-2.5">
+                    {typeof val === "boolean" ? (
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                        val ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-500"
+                      }`}>
+                        {val ? "true" : "false"}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-[var(--color-text-muted)]">{String(val)}</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
+  );
+}
+
+const ACTION_COLORS: Record<string, string> = {
+  login:        "bg-blue-100 text-blue-700",
+  docs_create:  "bg-green-100 text-green-700",
+  docs_update:  "bg-teal-100 text-teal-700",
+  email_send:   "bg-purple-100 text-purple-700",
+  hitl_approved:"bg-emerald-100 text-emerald-700",
+  hitl_rejected:"bg-red-100 text-red-700",
+};
+
+function ActionBadge({ action }: { action: string }) {
+  const cls = ACTION_COLORS[action] ?? "bg-gray-100 text-gray-600";
+  return (
+    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${cls}`}>{action}</span>
   );
 }

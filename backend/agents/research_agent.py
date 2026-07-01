@@ -1,13 +1,6 @@
 from google.adk.agents import Agent
 from google.adk.tools import google_search
-from tools.drive_tools import drive_read
-from google.adk.tools import ToolContext
-
-async def drive_list_files(tool_context: ToolContext) -> dict:
-    return {"status": "success", "files": []}
-
-async def drive_search(query: str, tool_context: ToolContext) -> dict:
-    return {"status": "success", "files": []}
+from tools.drive_tools import drive_read, drive_search
 
 INSTRUCTION = """
 # IDENTIDAD Y ROL
@@ -41,5 +34,5 @@ research_agent = Agent(
     model="gemini-2.5-flash",
     instruction=INSTRUCTION,
     description="Researches information using web search and internal Drive documents.",
-    tools=[drive_list_files, drive_search, drive_read, google_search]
+    tools=[drive_search, drive_read, google_search]
 )

@@ -32,6 +32,20 @@ async def callback(request: Request, code: str, state: str = None):
     creds_dict = credentials_to_dict(credentials)
     FirestoreService.store_user_credentials(user_id, user_info, creds_dict)
 
+    try:
+        import uuid, hashlib
+        from models.schemas import AuditEvent
+        FirestoreService.log_audit_event(AuditEvent(
+            event_id=str(uuid.uuid4()),
+            user_email_hash=hashlib.sha256(user_id.encode()).hexdigest(),
+            action="login",
+            resource_type="session",
+            resource_id=user_id,
+            timestamp=datetime.now(timezone.utc),
+        ))
+    except Exception:
+        pass
+
     token = jose_jwt.encode(
         {
             "sub": user_id,

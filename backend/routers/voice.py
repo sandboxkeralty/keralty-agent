@@ -1,18 +1,152 @@
+"""Voice pipeline using Gemini Live API.
+
+Flow:
+  Browser (mic) → PCM chunks → WebSocket → Gemini Live session → text transcript
+  Frontend receives the transcript and submits it through the regular chat SSE pipeline.
+
+WebSocket message protocol (all JSON):
+  Browser → Backend:
+    {"type": "audio_chunk", "data": "<base64 PCM 16kHz 16-bit mono>"}
+    {"type": "end_turn"}          — user stopped speaking, close this audio turn
+    {"type": "ping"}              — keepalive
+  Backend → Browser:
+    {"type": "status",     "message": "connected|ready|processing"}
+    {"type": "transcript", "text": "...", "final": true|false}
+    {"type": "turn_complete"}     — Gemini finished responding for this turn
+    {"type": "error",      "message": "..."}
+    {"type": "pong"}
+"""
+
+import asyncio
+import base64
+import os
+from typing import Optional
+
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-import json
+from google import genai
+from google.genai import types
+
+from config import settings
 
 router = APIRouter(prefix="/voice", tags=["voice"])
+
+_SYSTEM_INSTRUCTION = (
+    "Eres el asistente de voz de Keralty. "
+    "Transcribe fielmente lo que escucha el usuario y responde de forma breve y profesional. "
+    "Habla en español a menos que el usuario cambie de idioma."
+)
+
+_LIVE_AUDIO_MIME = "audio/pcm;rate=16000"
+
+
+def _get_genai_client() -> genai.Client:
+    if os.getenv("GOOGLE_GENAI_USE_VERTEXAI") == "1":
+        return genai.Client(
+            vertexai=True,
+            project=settings.GOOGLE_CLOUD_PROJECT,
+            location=settings.GOOGLE_CLOUD_REGION,
+        )
+    if settings.GOOGLE_API_KEY:
+        return genai.Client(api_key=settings.GOOGLE_API_KEY)
+    # Fall back to Vertex AI ADC
+    return genai.Client(
+        vertexai=True,
+        project=settings.GOOGLE_CLOUD_PROJECT,
+        location=settings.GOOGLE_CLOUD_REGION,
+    )
+
 
 @router.websocket("/stream")
 async def voice_stream(websocket: WebSocket):
     await websocket.accept()
+    await _safe_send(websocket, {"type": "status", "message": "connected"})
+
+    client = _get_genai_client()
+    live_config = types.LiveConnectConfig(
+        response_modalities=["TEXT"],
+        system_instruction=_SYSTEM_INSTRUCTION,
+        temperature=0.2,
+    )
+
     try:
-        while True:
-            data = await websocket.receive_text()
-            # Mock Gemini Live API integration
-            # In a real scenario, bytes would be sent/received and piped to the LLM
-            await websocket.send_text(json.dumps({"type": "status", "message": "listening"}))
+        async with client.aio.live.connect(
+            model=settings.GEMINI_LIVE_MODEL,
+            config=live_config,
+        ) as session:
+            await _safe_send(websocket, {"type": "status", "message": "ready"})
+            await _run_session(websocket, session)
+
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        print(f"Voice WebSocket error: {e}")
+        print(f"[voice] session error: {e}")
+        await _safe_send(websocket, {"type": "error", "message": f"Voice session failed: {e}"})
+
+
+async def _run_session(websocket: WebSocket, session) -> None:
+    """Run concurrent browser-receive and Gemini-receive loops."""
+    browser_task = asyncio.create_task(_recv_browser(websocket, session))
+    gemini_task = asyncio.create_task(_recv_gemini(websocket, session))
+
+    try:
+        done, pending = await asyncio.wait(
+            [browser_task, gemini_task],
+            return_when=asyncio.FIRST_EXCEPTION,
+        )
+        for task in pending:
+            task.cancel()
+        # Re-raise any exception from completed tasks
+        for task in done:
+            if not task.cancelled():
+                task.result()
+    except (WebSocketDisconnect, asyncio.CancelledError):
+        pass
+
+
+async def _recv_browser(websocket: WebSocket, session) -> None:
+    """Forward browser audio chunks to the Gemini Live session."""
+    while True:
+        try:
+            msg = await websocket.receive_json()
+        except Exception:
+            raise WebSocketDisconnect()
+
+        msg_type = msg.get("type")
+
+        if msg_type == "audio_chunk":
+            raw = base64.b64decode(msg["data"])
+            await session.send_realtime_input(
+                audio=types.Blob(data=raw, mime_type=_LIVE_AUDIO_MIME)
+            )
+
+        elif msg_type == "end_turn":
+            # Signal end of this audio turn to Gemini
+            await session.send_realtime_input(audio_stream_end=True)
+
+        elif msg_type == "ping":
+            await _safe_send(websocket, {"type": "pong"})
+
+
+async def _recv_gemini(websocket: WebSocket, session) -> None:
+    """Forward Gemini Live responses back to the browser."""
+    async for message in session.receive():
+        text = message.text
+        if text:
+            turn_complete = bool(
+                message.server_content and message.server_content.turn_complete
+            )
+            await _safe_send(websocket, {
+                "type": "transcript",
+                "text": text,
+                "final": turn_complete,
+            })
+
+        if message.server_content and message.server_content.turn_complete:
+            await _safe_send(websocket, {"type": "turn_complete"})
+
+
+async def _safe_send(websocket: WebSocket, data: dict) -> None:
+    try:
+        await websocket.send_json(data)
+    except Exception:
+        pass

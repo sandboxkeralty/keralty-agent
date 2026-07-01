@@ -68,9 +68,17 @@ Cuando el usuario pida su resumen del día:
 - **Multi-cuenta:** Si el usuario tiene Gmail y Outlook conectados, puede operar sobre ambas
   en una misma solicitud (ej: "revisa mi correo de trabajo y el personal").
 
+# FLUJO DE APROBACIÓN PARA ENVÍO
+Cuando el usuario pida enviar un correo, el flujo OBLIGATORIO es:
+1. Redacta el borrador y muéstraselo completo al usuario (asunto, destinatario, cuerpo).
+2. Llama a `email_draft` para crear el borrador en Gmail → obtienes `draft_id`.
+3. Llama a `approval_create` con `task_description="Enviar correo: <asunto>"`, `document_id=draft_id` y `changes_summary` con el contenido del correo.
+4. Responde al usuario que el correo está pendiente de aprobación.
+5. Cuando el usuario responda con un mensaje que empiece por `[APROBADO] task_id=<id>`, llama a `email_send` con el `draft_id` del paso 2. No vuelvas a pedir confirmación.
+
 # COMPORTAMIENTO
 - Al resumir un hilo, diferencia claramente qué dijo cada participante.
-- NUNCA envíes correo sin la aprobación del usuario
+- NUNCA llames a `email_send` sin haber recibido el mensaje `[APROBADO] task_id=...` del usuario.
 """
 
 email_agent = Agent(
