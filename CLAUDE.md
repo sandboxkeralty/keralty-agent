@@ -99,6 +99,8 @@ User message → POST /api/chat (SSE stream)
 
 All agents live in `backend/agents/`. The orchestrator's `INSTRUCTION` block in `orchestrator.py` contains the routing rules — **edit this when adding capabilities or fixing misdirected requests**.
 
+**Important ADK constraint**: Gemini's API rejects an agent whose `tools=[...]` list mixes the built-in `google_search` grounding tool with custom Python function tools ("Multiple tools are supported only when they are all search tools"). `ResearchAgent` needs both web search and custom Drive tools, so `google_search` is isolated inside its own single-tool sub-agent (`_web_search_agent` / `WebSearchAgent`, defined inline in `research_agent.py`) and exposed to `ResearchAgent` via `google.adk.tools.agent_tool.AgentTool` — never add `google_search` directly to any agent's `tools=[...]` alongside other tools; wrap it the same way instead.
+
 ### Authentication & OAuth flow
 
 ```
@@ -119,7 +121,7 @@ POST /api/chat → middleware verifies JWT → request.state.user = {uid, email}
 
 Key files:
 - `backend/auth/google_oauth.py` — OAuth flow helpers + `_flow_cache` (PKCE state preservation)
-- `backend/auth/auth_middleware.py` — JWT verification; falls back to `sandbox-user` for `test-token`
+- `backend/auth/auth_middleware.py` — JWT verification; falls back to `sandbox-user` for `test-token`. Only authenticates paths matching `_AUTHENTICATED_PREFIXES = ("/api/", "/admin", "/knowledge", "/history")` — **`/documents` and the `/voice` WebSocket route are deliberately excluded** (see notes below; don't add `/documents` here without also fixing its frontend caller, which sends no `Authorization` header today).
 - `backend/routers/auth.py` — `/auth/login` and `/auth/callback`
 - `backend/routers/chat.py` — loads Firestore creds, injects into ADK session state; also persists messages
 - `backend/tools/_auth.py` — `_credentials(tool_context)` helper: extracts creds, refreshes if expired, re-persists to Firestore
@@ -133,7 +135,22 @@ Required Cloud Run env vars: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE
 
 **Token auto-refresh**: `tools/_auth.py` checks `creds.expired`, calls `creds.refresh(GRequest())`, and re-persists updated tokens to Firestore. No silent 401s.
 
-**Note**: `routers/documents.py` (`GET /documents/`) does not thread user credentials — it uses ADC only. Files listed via this endpoint must be accessible by the service account.
+**Note**: `routers/documents.py` (`GET /documents/`) does not thread user credentials — it uses ADC only. Files listed via this endpoint must be accessible by the service account. This is a known, tracked gap — the DocumentPicker (paperclip in chat) can't find a user's own files as a result. See `docs/product-roadmap-new-features.md` (Tier 0.4) before fixing; it's deliberately excluded from `auth_middleware`'s authenticated paths because `DocumentPicker.tsx` sends no `Authorization` header today, so adding auth there without also fixing the frontend call would 401 it outright.
+
+### Google Sheets tools & Drive search
+
+`services/sheets.py`'s `SheetsService` transparently handles **both** native Google Sheets and raw uploaded `.xlsx`/`.xls` files by mimeType-detecting the target file (`_is_raw_excel_file`) and, for raw Excel, parsing it via `openpyxl` (downloaded through Drive's `get_media`, not the Sheets API — which only understands native Sheets IDs) instead of erroring out:
+- `create_spreadsheet(title)` — creates a native Sheet, returns `{spreadsheet_id, first_sheet_title}` (the real, locale-dependent default tab name — never assume `"Sheet1"`)
+- `append_values(id, range, values)` — `values().append` with `INSERT_ROWS`; finds the next empty row automatically
+- `share_spreadsheet(id, email)` — targeted per-user sharing (mirrors `DocsService.share_document`), not the old `anyone/writer` grant
+- Values read from raw Excel cells are passed through `_json_safe()` — openpyxl returns native Python `datetime`/`date` objects for date-formatted cells (the Sheets API never does), which aren't JSON-serializable when ADK sends the tool result back to Gemini
+
+`tools/sheets_tools.py`:
+- `create_spreadsheet(title, data_json=None)` — writes initial data in the same call (never leaves a spreadsheet empty when data was given)
+- `sheets_list_tabs(spreadsheet_id)` — lists real tab names/IDs; call this before `read_spreadsheet_range` for any spreadsheet found by search rather than created in-session
+- `read_spreadsheet_range`, `update_spreadsheet_values`, `append_spreadsheet_values`
+
+`services/drive.py`'s `list_documents` accepts a `mime_types` param (aliased via `_MIME_TYPE_ALIASES`, e.g. `"spreadsheet"` → both the native Google Sheets mimeType and both Excel mimeTypes) and defaults to including all of Docs/Slides/Sheets/Excel — so `drive_search` finds spreadsheets whether native or uploaded Excel, without the calling agent needing to specify a filter. The mimeType clause is parenthesized in the built query (`(mimeType='X' or mimeType='Y') and name contains '...'`) — without the parens, operator precedence silently broadens the query whenever a name filter is combined with 2+ mimeTypes.
 
 ### HITL (Human-in-the-Loop) approval flow
 
@@ -176,13 +193,15 @@ Full 6-stage hybrid RAG in `backend/services/rag/`:
 5. **Abstention gate** (`pipeline.py`): concept-recall check (keyword coverage of query terms in retrieved text); abstains with follow-up suggestions if coverage < 0.5
 6. **Context assembly**: `[[filename:pN]]` citation blocks; `RAGResult` dataclass with `should_abstain`, `context_text`, `citations`, `coverage`
 
-Chunking (`chunker.py`): structure-aware paragraph split → greedy merge (max 1000 tokens) → 15% overlap → coalesce < 120 tokens → neighbor links.
+Chunking (`chunker.py`): structure-aware paragraph split → greedy merge (max 1000 tokens) → coalesce < 120 tokens → 15% overlap (applied **last**, after coalescing — not before) → neighbor links.
 
-Embeddings (`embedder.py`): Vertex AI `text-embedding-005`, batch size 250, `RETRIEVAL_DOCUMENT` task type for indexing, `RETRIEVAL_QUERY` for queries.
+**Token-count correctness matters more than it looks here.** Both `_merge_into_chunks` and `_coalesce_small` measure the token estimate (`len(text) // 4`) of the actual *joined candidate string*, not a sum of pre-computed per-block estimates — summing individually-truncated per-block counts systematically undercounts a joined string's real length (floor-division drift + untracked join-separator characters), which let chunk sizes silently balloon far past `max_tokens` for fragmented documents (pypdf's extraction of tables/forms/multi-column PDFs produces many tiny "paragraphs"; clean Markdown rarely triggers this). `_coalesce_small` also caps merges so a run of tiny fragments can never combine into an unbounded chunk. If you touch this file, re-test with a pathological input (hundreds of single-word "paragraphs"), not just clean text — that's exactly what shipped broken originally.
+
+Embeddings (`embedder.py`): Vertex AI `text-embedding-005`, `RETRIEVAL_DOCUMENT` task type for indexing, `RETRIEVAL_QUERY` for queries. Batches by both item count (`_MAX_BATCH_ITEMS=250`) and an estimated token budget (`_MAX_BATCH_TOKENS=10000`, conservative on purpose). **The character-based token estimate can't be trusted to predict Vertex's real per-request 20000-token limit** — real tokenization density varies by language/content (Spanish text overshot the estimate by ~50% in production). `_embed_batch` self-heals: on the actual "token count exceeded" 400 error, it splits the failing batch in half and retries recursively, so correctness doesn't depend on the estimate being accurate, only on the pre-batching being a reasonable first line of defense.
 
 Storage (`store.py`): Firestore `kb_chunks` collection (embedding arrays as List[float]), `kb_documents` collection for metadata.
 
-Ingestion (`ingestion.py`): accepts PDF (pypdf), DOCX (python-docx), CSV (csv.DictReader), TXT/MD. GCS upload of originals to `keralty-agent-dev-artifacts`. Cache invalidated after every ingestion.
+Ingestion (`ingestion.py`): accepts PDF (pypdf), DOCX (python-docx), CSV (csv.DictReader), TXT/MD. GCS upload of originals to `keralty-agent-dev-artifacts` under a `kb/{doc_id}/{filename}` prefix (via `settings.GCS_BUCKET` — there is no separate `KB_GCS_BUCKET` setting; that was removed after it turned out to reference a bucket that was never actually provisioned). Cache invalidated after every ingestion. Requires `python-multipart` (FastAPI form/file parsing) and `google-cloud-aiplatform` (provides the `vertexai` import used here and by `tools/image_tools.py`) — both must be in `requirements.txt`; their absence was masked for a long time because the code paths that need them were gated behind `ADMIN_PANEL_ENABLED=false`.
 
 Ingestion endpoint: `POST /knowledge/documents` (50 MB limit, admin-gated). Management: `GET /knowledge/documents`, `DELETE /knowledge/documents/{doc_id}`.
 
@@ -199,6 +218,8 @@ Ingestion endpoint: `POST /knowledge/documents` (50 MB limit, admin-gated). Mana
 
 `tools/email_tools.py` — all 9 functions call `GmailProvider` with `_credentials(tool_context)`. `email_track` writes to Firestore `email_tracking`. EmailAgent has mandatory HITL before `email_send`.
 
+**Email dashboard** (`GET /api/email/summary`, `routers/email.py`, mounted at `/api/email` so it's covered by the standard `/api/` auth check — no `auth_middleware` change needed for it): a plain REST endpoint, not an ADK tool, so it can't use `tool_context` — it has its own small `_credentials_for_user(user_id)` helper that mirrors `tools/_auth.py`'s load-refresh-repersist logic but is keyed directly off `request.state.user`. Returns `inbox_today` (via `GmailProvider.search_threads("in:inbox after:YYYY/MM/DD", ...)`, deduped by `thread_id`), `tracked` (the same `email_tracking` Firestore query `email_get_tracking` uses), and `indicators` (`bandeja`/`criticos`/`pendientes`/`seguimiento` — "críticos" maps to Gmail's own `is:important`, "pendientes" to `is:unread`; no invented heuristic). `frontend/app/[locale]/email/page.tsx` calls this on mount and on the "Actualizar" button — it used to just POST a fire-and-forget chat message and discard the response.
+
 ### Google Slides write operations
 
 `services/slides.py` — real Slides batchUpdate API:
@@ -214,7 +235,9 @@ Ingestion endpoint: `POST /knowledge/documents` (50 MB limit, admin-gated). Mana
 
 ### Imagen 3 (image generation)
 
-`tools/image_tools.py` — calls `vertexai.preview.vision_models.ImageGenerationModel` with `IMAGEN_MODEL` (default `imagen-3.0-generate-001`). Uploads result bytes to GCS `keralty-agent-dev-artifacts/images/`, makes blob public, returns public URL. Falls back to placeholder URL on any error.
+`tools/image_tools.py` — calls `vertexai.preview.vision_models.ImageGenerationModel` with `IMAGEN_MODEL` (default `imagen-3.0-generate-001`). Uploads result bytes to GCS `keralty-agent-dev-artifacts/images/`, makes blob public (`blob.make_public()`), returns public URL. Falls back to placeholder URL on any error — this silently masked both a missing bucket and a missing `google-cloud-aiplatform` dependency for a long time; if image generation ever silently starts returning placeholders again, check those two things first before assuming a prompt/model issue.
+
+The bucket has **uniform bucket-level access disabled** specifically so `make_public()`'s legacy per-object ACL call keeps working — the bucket also holds private KB documents (`kb/` prefix) alongside public images (`images/` prefix), so making the whole bucket public via IAM instead (the usual fix for UBLA + public objects) would wrongly expose KB content. Only `image_tools.py` calls `make_public()`; KB uploads in `ingestion.py` never do, so they stay private by default. The Cloud Run backend's service account (`keralty-agent-sa@...`) has `roles/storage.objectAdmin` scoped to this one bucket, not a project-wide storage role.
 
 ### Session persistence & history
 
@@ -227,7 +250,11 @@ Ingestion endpoint: `POST /knowledge/documents` (50 MB limit, admin-gated). Mana
 - `GET /history/{session_id}` — full message thread (ownership-checked)
 - `DELETE /history/{session_id}` — deletes session (messages retained for audit)
 
-Frontend: `frontend/app/[locale]/history/page.tsx` — two-column layout: session list + message thread.
+**Frontend architecture (Claude.ai/ChatGPT-style, not a separate history page)**: there is no `/history` route in the frontend anymore — it was removed once the sidebar covered everything it did. `frontend/hooks/useChatSession.tsx` (`ChatSessionProvider`/`useChatSession`) holds `sessionId` and `messages` in React context, provided once at the `AppShell` level (`components/layout/AppShell.tsx`) so it persists across route navigation instead of living as local state inside `ChatWindow`. `components/layout/Sidebar.tsx` fetches `GET /history/`, groups sessions by recency (Hoy/Ayer/Últimos 7 días/Anteriores), and on click fetches `GET /history/{id}` and calls the context's `loadSession(id, messages)` — switching conversations updates the same mounted `ChatWindow` instantly, with no page reload. "Nueva conversación" calls `startNewConversation()`, which generates a fresh `session_id` — **`sessionStorage`'s `keralty_session` key persists per browser tab, so anything that doesn't explicitly call `startNewConversation()` will keep silently reusing the same session** (this was a real, shipped bug before the redesign: the old sidebar link just navigated to `/` without clearing it).
+
+Composite Firestore indexes actually required (mismatches here silently 500 every request — the exception is swallowed by the frontend's `if (res.ok)` check, so a broken index looks identical to "no data" in the UI):
+- `sessions(user_id ASC, updated_at DESC)` — **not** `created_at`; `get_sessions_by_user` orders by `updated_at`
+- `messages(session_id ASC, timestamp ASC)` — **not** `created_at`; `get_messages` orders by `timestamp`, and `MessageInDB` doesn't even have a `created_at` field
 
 ### Admin panel
 
@@ -238,7 +265,7 @@ Frontend: `frontend/app/[locale]/history/page.tsx` — two-column layout: sessio
 - **Auditoría**: color-coded action badges from `GET /admin/audit`
 - **Configuración**: feature flag badges from `GET /admin/configs` (read-only)
 
-All admin endpoints gated on `ADMIN_PANEL_ENABLED=true`.
+All admin endpoints gated on `ADMIN_PANEL_ENABLED=true` (this is the **only** gate — there is no per-user role check anywhere in the backend; `request.state.user` never carries a `role`, and Firestore `users.role` is an unenforced free-text field). Once the flag is on, every authenticated user gets full admin access. The deployed Cloud Run backend currently has this flag set to `true` via `--update-env-vars` (the code default in `config.py` is `false`) — check the live env var, not just the code default, before assuming the panel is inaccessible. See `docs/product-roadmap-new-features.md` (Tier 0.1) for the planned RBAC work.
 
 ### DocumentPicker in chat
 
@@ -285,14 +312,18 @@ RAG pipeline knobs in `config.py`: `RAG_CHUNK_TARGET_TOKENS` (800), `RAG_CHUNK_M
 |---|---|---|
 | IAP authentication | `backend/auth/iap.py` | Empty stub — not needed unless deploying behind Cloud IAP |
 | Backend i18n | `backend/i18n/` | All three files empty — frontend uses `next-intl` independently; backend never sends localised strings |
-| Email dashboard page | `frontend/app/[locale]/email/page.tsx` | UI shell — navigation and empty states work, but inbox/tracking data never populates from API; email functionality flows through the chat interface |
-| Audit logging — slides & KB | `tools/slides_tools.py`, `routers/knowledge.py` | `slides_create` and KB document ingestion are not logged to `audit_events`; all other write operations (docs, email, HITL) are |
+| No role-based access control | `auth/auth_middleware.py`, `routers/admin.py` | `ADMIN_PANEL_ENABLED` is a single global flag with no per-user role check; anyone gets full admin access once it's on, or none at all |
+| DocumentPicker credential threading | `routers/documents.py` | Uses ADC only, never the logged-in user's OAuth credentials — can't see a user's own Drive files. Deliberately excluded from `auth_middleware`'s authenticated paths (see Google Workspace API access section) |
+| Audit logging — slides & KB | `tools/slides_tools.py`, `routers/knowledge.py` | `slides_create` and KB document ingestion are not logged to `audit_events`; all other write operations (docs, sheets, email, HITL) are |
 | RAG generation guardrails E10–E16 | _(no code file)_ | Chain-of-verification, entity consistency, timeline/numeric checks delegated to agent prompt instructions, not implemented as callable tools |
-| Outlook email provider | `backend/services/email/outlook_provider.py` | Empty stub — Azure OAuth vars defined in config but provider not implemented |
+| Outlook email provider | `backend/services/email/outlook_provider.py` | Empty stub — Azure OAuth vars defined in config but provider not implemented; there is also no Outlook-equivalent of `auth/google_oauth.py` yet, so this is a full OAuth-flow build, not just a provider |
 | Email package scaffolding | `backend/services/email/{__init__,base,factory}.py` | All empty — only `gmail_provider.py` is implemented |
 | Legacy email stub | `backend/services/email.py` | 49-line stub GmailProvider returning mocks — **not imported anywhere** (superseded by `services/email/gmail_provider.py`); safe to delete |
 | Legacy service stubs | `backend/services/{knowledge_base,storage,voice}.py` | All empty, not imported anywhere — scaffolding left over from early design |
-| Vertex AI utility | `backend/services/vertex_ai.py` | Minimal: `init_vertex_ai()` and `get_grounding_tool()` — called only if `USE_VERTEX_AI=true` / `SEARCH_GROUNDING_ENABLED=true` |
+| Vertex AI utility | `backend/services/vertex_ai.py` | Minimal: `init_vertex_ai()` and `get_grounding_tool()` — called only if `USE_VERTEX_AI=true` / `SEARCH_GROUNDING_ENABLED=true`; `get_grounding_tool()` specifically is defined but never actually wired into any agent |
+| No automated test suite | _(no `tests/` directory)_ | Only ad-hoc one-off scripts exist as precedent (e.g. historical `test_signature.py`); every fix this cycle was verified by manually exercising the live deployment |
+
+See `docs/product-roadmap-new-features.md` (Tier 0) for the planned fixes to the RBAC, testing, and observability gaps above.
 
 ---
 
@@ -311,12 +342,12 @@ RAG pipeline knobs in `config.py`: `RAG_CHUNK_TARGET_TOKENS` (800), `RAG_CHUNK_M
   - `email_tracking` — follow-up tracking records
   - `kb_chunks` — RAG document chunks with 768-dim embedding arrays
   - `kb_documents` — RAG document metadata
-- **Firestore composite indexes** (deployed): `email_tracking(user_id,status)`, `tasks(user_id,status,created_at)`, `messages(session_id,created_at)`, `sessions(user_id,created_at)`
-- **GCS bucket**: `keralty-agent-dev-artifacts` — stores generated images (`images/`) and KB original files (`kb/`)
+- **Firestore composite indexes** (deployed): `email_tracking(user_id,status)`, `tasks(user_id,status,created_at)`, `messages(session_id,timestamp)`, `sessions(user_id,updated_at)` — **double-check the actual field name a query orders by before assuming an index matches it.** Two of these were originally deployed against the wrong field (`created_at` instead of `timestamp`/`updated_at`), which silently 500'd conversation history for an unknown period — the frontend's `if (res.ok)` checks swallowed the error, so it just looked like "no data" in the UI, not a bug.
+- **GCS bucket**: `keralty-agent-dev-artifacts` — stores generated images (`images/`) and KB original files (`kb/`). Uniform bucket-level access is **disabled** on this bucket (see Imagen 3 section for why). The Cloud Run backend's service account has `roles/storage.objectAdmin` scoped to this bucket specifically.
 - **Active GCP account**: `sandboxkeralty@gmail.com`
 - **GitHub repo**: `https://github.com/sandboxkeralty/keralty-agent.git` — push as user `sandboxkeralty` (`gh auth switch --user sandboxkeralty`)
 
-Enabled APIs: Drive, Docs, Sheets, Slides, Gmail, Vertex AI, Gemini, Firestore, Cloud Run, Artifact Registry, Cloud Build, Logging, Monitoring, Trace.
+Enabled APIs: Drive, Docs, Sheets, Slides, Gmail, Vertex AI, Gemini, Firestore, Cloud Run, Artifact Registry, Cloud Build, Logging, Monitoring, Trace. **Not enabled** (verified directly, despite being assumed in earlier planning docs): Calendar, Cloud Scheduler, Cloud DLP — all three are prerequisites for specific items in `docs/product-roadmap-new-features.md` and need enabling (plus, for Calendar, a new OAuth scope + user re-consent) before that work starts.
 
 ---
 
@@ -325,3 +356,38 @@ Enabled APIs: Drive, Docs, Sheets, Slides, Gmail, Vertex AI, Gemini, Firestore, 
 Frontend uses `next-intl` with locales `en` and `es` (default `es`). Message files are at `frontend/messages/{en,es}.json`. The middleware at `frontend/middleware.ts` handles locale prefixing for all non-API routes.
 
 `backend/i18n/` exists as a scaffold but all files are empty — backend responses are in the agent's natural language (Spanish/English bilingual per orchestrator instruction).
+
+---
+
+## Branding
+
+`branding/` holds the source-of-truth brand assets — `Paleta de colores Keralty.xlsx` (official
+Pantone-mapped hex palette), `Template_Keralty.pptx` (the executive presentation template; its
+body font, Calibri, and its dominant navy, `#002060`, are what the frontend's brand colors and
+typography are actually derived from — not the palette xlsx alone, which uses slightly different
+navy shades), and `logo.png` (transparent PNG, dark navy wordmark — copied to
+`frontend/public/keralty-logo.png` for actual use).
+
+`frontend/app/globals.css`'s `@theme` block holds the applied brand colors
+(`--color-primary: #00B288`, `--color-navy: #002060`, etc.) — **check this file's comments and
+`branding/` before changing any brand color**, don't eyeball a replacement. The body font is
+Carlito (`app/[locale]/layout.tsx`, loaded via `next/font/google`), a freely-licensed
+metric-compatible match for Calibri — the CSS previously declared `font-family: 'Inter'` but
+never actually loaded that font anywhere, so it silently fell back to `system-ui`; this is now
+fixed and wired correctly.
+
+The logo is displayed in the sidebar header on a **white badge**, not directly against the
+sidebar's dark navy background — its wordmark is dark navy too, so it would be illegible without
+the white backing.
+
+---
+
+## Related documentation
+
+- `README.md` — project overview, architecture diagram (Mermaid), setup, and deployment quick
+  reference
+- `docs/product-roadmap-new-features.md` — forward-looking roadmap for the *next* development
+  cycle (this file, `CLAUDE.md`, documents the system as it exists *today*)
+- `docs/use-cases-strategic-testing.md` — end-to-end test scenarios for every feature, written
+  from an executive user's perspective; run through this after any deployment that touches more
+  than one component
