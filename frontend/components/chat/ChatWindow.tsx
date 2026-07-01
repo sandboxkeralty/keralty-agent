@@ -17,7 +17,7 @@ function MarkdownImage({ src, alt }: ImgHTMLAttributes<HTMLImageElement>) {
   const handleDownload = async () => {
     if (!imgSrc) return;
     try {
-      const res = await fetch(imgSrc);
+      const res = await fetch(imgSrc, { cache: 'no-store' });
       const blob = await res.blob();
       const blobUrl = URL.createObjectURL(blob);
       const a = document.createElement('a');
