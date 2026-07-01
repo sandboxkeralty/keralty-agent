@@ -30,6 +30,41 @@ function stripMarkdownForSpeech(text: string): string {
     .trim();
 }
 
+// speechSynthesis.getVoices() often returns empty on first call — the list loads
+// asynchronously and fires "voiceschanged" once ready (notably in Chrome).
+function getVoicesAsync(): Promise<SpeechSynthesisVoice[]> {
+  return new Promise((resolve) => {
+    const existing = window.speechSynthesis.getVoices();
+    if (existing.length > 0) {
+      resolve(existing);
+      return;
+    }
+    const handle = () => {
+      window.speechSynthesis.removeEventListener('voiceschanged', handle);
+      resolve(window.speechSynthesis.getVoices());
+    };
+    window.speechSynthesis.addEventListener('voiceschanged', handle);
+    // Some browsers never fire voiceschanged — don't block speech forever.
+    setTimeout(() => {
+      window.speechSynthesis.removeEventListener('voiceschanged', handle);
+      resolve(window.speechSynthesis.getVoices());
+    }, 500);
+  });
+}
+
+// Setting utterance.lang alone does NOT guarantee a matching voice is used — without an
+// explicit utterance.voice, many browsers silently fall back to the default (often English)
+// voice and just phonetically read the other language's text, which is exactly the bug
+// reported ("it doesn't speak Spanish, it's funny").
+async function pickVoice(langPrefix: 'es' | 'en'): Promise<SpeechSynthesisVoice | undefined> {
+  const voices = await getVoicesAsync();
+  if (voices.length === 0) return undefined;
+  const target = langPrefix === 'es' ? 'es-es' : 'en-us';
+  const exact = voices.find((v) => v.lang.toLowerCase() === target);
+  if (exact) return exact;
+  return voices.find((v) => v.lang.toLowerCase().startsWith(langPrefix));
+}
+
 function MarkdownImage({ src, alt }: ImgHTMLAttributes<HTMLImageElement>) {
   const imgSrc = typeof src === 'string' ? src : undefined;
 
@@ -90,11 +125,16 @@ export function ChatWindow() {
   const formRef = useRef<HTMLFormElement>(null);
   const voiceTurnRef = useRef(false);
 
-  const speak = (text: string) => {
+  const speak = async (text: string) => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
+
+    const targetLang = locale === 'es' ? 'es' : 'en';
+    const voice = await pickVoice(targetLang);
+
     const utterance = new SpeechSynthesisUtterance(stripMarkdownForSpeech(text));
-    utterance.lang = locale === 'es' ? 'es-ES' : 'en-US';
+    utterance.lang = voice?.lang || (targetLang === 'es' ? 'es-ES' : 'en-US');
+    if (voice) utterance.voice = voice;
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
