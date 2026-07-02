@@ -105,7 +105,12 @@
     "noSubject": "(Sin asunto)",
     "to": "Para:",
     "followupGenerated": "Borrador de seguimiento creado",
-    "followupError": "No se pudo generar el seguimiento"
+    "followupError": "No se pudo generar el seguimiento",
+    "summaryWarning": "Algunos datos podrían estar incompletos — falló una consulta a Gmail. Intenta actualizar.",
+    "priorityCritical": "Crítico",
+    "priorityHigh": "Alto",
+    "priorityMedium": "Medio",
+    "priorityLow": "Bajo"
   },
   "errors": {
     "networkError": "Error de conexión. Por favor verifica tu conexión a internet.",

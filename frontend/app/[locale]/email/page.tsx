@@ -4,12 +4,15 @@ import React, { useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Mail, Loader2, RefreshCw, Send, Clock } from 'lucide-react';
 
+type Priority = 'CRITICO' | 'ALTO' | 'MEDIO' | 'BAJO';
+
 interface EmailThread {
   id: string;
   subject: string;
   from: string;
   date: string;
   snippet: string;
+  priority?: Priority;
 }
 
 interface TrackedEmail {
@@ -28,6 +31,26 @@ interface EmailIndicators {
   seguimiento: number;
 }
 
+interface FollowupResult {
+  subject?: string;
+  body?: string;
+  error?: string;
+}
+
+const PRIORITY_STYLES: Record<Priority, string> = {
+  CRITICO: 'bg-red-100 text-red-700',
+  ALTO: 'bg-orange-100 text-orange-700',
+  MEDIO: 'bg-yellow-100 text-yellow-700',
+  BAJO: 'bg-gray-100 text-gray-600',
+};
+
+const PRIORITY_KEY: Record<Priority, string> = {
+  CRITICO: 'priorityCritical',
+  ALTO: 'priorityHigh',
+  MEDIO: 'priorityMedium',
+  BAJO: 'priorityLow',
+};
+
 export default function EmailPage() {
   const t = useTranslations('email');
   const locale = useLocale();
@@ -37,13 +60,18 @@ export default function EmailPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'inbox' | 'tracking'>('inbox');
   const [generatingId, setGeneratingId] = useState<string | null>(null);
-  const [followupResult, setFollowupResult] = useState<Record<string, string>>({});
+  const [followupResult, setFollowupResult] = useState<Record<string, FollowupResult>>({});
+  const [warnings, setWarnings] = useState<string[]>([]);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
   const getToken = () => typeof window !== 'undefined' ? localStorage.getItem('keralty_token') || 'test-token' : 'test-token';
 
   const handleGenerateFollowup = async (trackingId: string) => {
     setGeneratingId(trackingId);
-    setFollowupResult(prev => ({ ...prev, [trackingId]: '' }));
+    setFollowupResult(prev => {
+      const next = { ...prev };
+      delete next[trackingId];
+      return next;
+    });
     try {
       const res = await fetch(`${apiUrl}/api/email/tracking/${trackingId}/generate-followup`, {
         method: 'POST',
@@ -51,9 +79,9 @@ export default function EmailPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || t('followupError'));
-      setFollowupResult(prev => ({ ...prev, [trackingId]: t('followupGenerated') }));
+      setFollowupResult(prev => ({ ...prev, [trackingId]: { subject: data.subject, body: data.body } }));
     } catch (e) {
-      setFollowupResult(prev => ({ ...prev, [trackingId]: e instanceof Error ? e.message : t('followupError') }));
+      setFollowupResult(prev => ({ ...prev, [trackingId]: { error: e instanceof Error ? e.message : t('followupError') } }));
     } finally {
       setGeneratingId(null);
     }
@@ -62,7 +90,11 @@ export default function EmailPage() {
   const fetchSummary = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${apiUrl}/api/email/summary`, {
+      // The executive's live local timezone (wherever they're logged in from
+      // right now, not a fixed HQ timezone) — so "today" in Bandeja/Críticos/
+      // Pendientes reflects their actual calendar day.
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      const res = await fetch(`${apiUrl}/api/email/summary?tz=${encodeURIComponent(tz)}`, {
         headers: { Authorization: `Bearer ${getToken()}` },
       });
       if (res.ok) {
@@ -70,6 +102,7 @@ export default function EmailPage() {
         setThreads(data.inbox_today || []);
         setTracked(data.tracked || []);
         setIndicators(data.indicators || { bandeja: 0, criticos: 0, pendientes: 0, seguimiento: 0 });
+        setWarnings(data.warnings || []);
       }
     } catch (e) {
       console.error(e);
@@ -113,6 +146,12 @@ export default function EmailPage() {
         ))}
       </div>
 
+      {warnings.length > 0 && (
+        <div className="mb-4 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-[8px] px-3 py-2">
+          {t('summaryWarning')}
+        </div>
+      )}
+
       {/* Tab nav */}
       <div className="flex gap-1 border-b border-[var(--color-border)] mb-4">
         {(['inbox', 'tracking'] as const).map(tab => (
@@ -147,9 +186,16 @@ export default function EmailPage() {
             <ul className="divide-y divide-[var(--color-border)]">
               {threads.map(thread => (
                 <li key={thread.id} className="p-4 hover:bg-[var(--color-background)] transition-colors">
-                  <div className="flex justify-between items-start mb-1">
-                    <span className="font-semibold text-sm text-[var(--color-navy)]">{thread.from}</span>
-                    <span className="text-xs text-[var(--color-text-muted)]">{thread.date}</span>
+                  <div className="flex justify-between items-start mb-1 gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-semibold text-sm text-[var(--color-navy)] truncate">{thread.from}</span>
+                      {thread.priority && (
+                        <span className={`shrink-0 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-full ${PRIORITY_STYLES[thread.priority]}`}>
+                          {t(PRIORITY_KEY[thread.priority])}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-xs text-[var(--color-text-muted)] shrink-0">{thread.date}</span>
                   </div>
                   <p className="text-sm font-medium text-[var(--color-text-primary)]">{thread.subject}</p>
                   <p className="text-xs text-[var(--color-text-muted)] mt-0.5 line-clamp-1">{thread.snippet}</p>
@@ -185,7 +231,15 @@ export default function EmailPage() {
                       <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{t('due')} {new Date(item.deadline).toLocaleDateString(locale)}</p>
                     )}
                     {followupResult[item.tracking_id] && (
-                      <p className="text-xs text-[var(--color-primary)] mt-0.5">{followupResult[item.tracking_id]}</p>
+                      followupResult[item.tracking_id].error ? (
+                        <p className="text-xs text-red-600 mt-1">{followupResult[item.tracking_id].error}</p>
+                      ) : (
+                        <div className="text-xs mt-2 bg-[var(--color-primary-light)]/50 border border-[var(--color-primary)]/20 rounded-[8px] p-2 max-w-md">
+                          <p className="font-semibold text-[var(--color-primary)] mb-1">{t('followupGenerated')}</p>
+                          <p className="font-medium text-[var(--color-navy)]">{followupResult[item.tracking_id].subject}</p>
+                          <p className="whitespace-pre-wrap text-[var(--color-text-secondary)] mt-1">{followupResult[item.tracking_id].body}</p>
+                        </div>
+                      )
                     )}
                   </div>
                   <button

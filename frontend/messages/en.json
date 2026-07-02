@@ -105,7 +105,12 @@
     "noSubject": "(No subject)",
     "to": "To:",
     "followupGenerated": "Follow-up draft created",
-    "followupError": "Could not generate the follow-up"
+    "followupError": "Could not generate the follow-up",
+    "summaryWarning": "Some data may be incomplete right now — a Gmail request failed. Try refreshing.",
+    "priorityCritical": "Critical",
+    "priorityHigh": "High",
+    "priorityMedium": "Medium",
+    "priorityLow": "Low"
   },
   "errors": {
     "networkError": "Connection error. Please check your internet connection.",

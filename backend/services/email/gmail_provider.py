@@ -160,6 +160,7 @@ class GmailProvider:
             "to": _header(headers, "To"),
             "from": _header(headers, "From"),
             "thread_id": msg.get("threadId", ""),
+            "snippet": msg.get("snippet", ""),
         }
 
     @staticmethod
