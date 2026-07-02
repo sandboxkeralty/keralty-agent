@@ -30,41 +30,6 @@ function stripMarkdownForSpeech(text: string): string {
     .trim();
 }
 
-// speechSynthesis.getVoices() often returns empty on first call — the list loads
-// asynchronously and fires "voiceschanged" once ready (notably in Chrome).
-function getVoicesAsync(): Promise<SpeechSynthesisVoice[]> {
-  return new Promise((resolve) => {
-    const existing = window.speechSynthesis.getVoices();
-    if (existing.length > 0) {
-      resolve(existing);
-      return;
-    }
-    const handle = () => {
-      window.speechSynthesis.removeEventListener('voiceschanged', handle);
-      resolve(window.speechSynthesis.getVoices());
-    };
-    window.speechSynthesis.addEventListener('voiceschanged', handle);
-    // Some browsers never fire voiceschanged — don't block speech forever.
-    setTimeout(() => {
-      window.speechSynthesis.removeEventListener('voiceschanged', handle);
-      resolve(window.speechSynthesis.getVoices());
-    }, 500);
-  });
-}
-
-// Setting utterance.lang alone does NOT guarantee a matching voice is used — without an
-// explicit utterance.voice, many browsers silently fall back to the default (often English)
-// voice and just phonetically read the other language's text, which is exactly the bug
-// reported ("it doesn't speak Spanish, it's funny").
-async function pickVoice(langPrefix: 'es' | 'en'): Promise<SpeechSynthesisVoice | undefined> {
-  const voices = await getVoicesAsync();
-  if (voices.length === 0) return undefined;
-  const target = langPrefix === 'es' ? 'es-es' : 'en-us';
-  const exact = voices.find((v) => v.lang.toLowerCase() === target);
-  if (exact) return exact;
-  return voices.find((v) => v.lang.toLowerCase().startsWith(langPrefix));
-}
-
 function MarkdownImage({ src, alt }: ImgHTMLAttributes<HTMLImageElement>) {
   const imgSrc = typeof src === 'string' ? src : undefined;
 
@@ -120,32 +85,53 @@ export function ChatWindow() {
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
   const [showPicker, setShowPicker] = useState(false);
   const [attachedDoc, setAttachedDoc] = useState<{ file: DriveFile; text: string } | null>(null);
-  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
-  const voiceTurnRef = useRef(false);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
 
-  const speak = async (text: string) => {
-    if (typeof window === 'undefined' || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-
-    const targetLang = locale === 'es' ? 'es' : 'en';
-    const voice = await pickVoice(targetLang);
-
-    const utterance = new SpeechSynthesisUtterance(stripMarkdownForSpeech(text));
-    utterance.lang = voice?.lang || (targetLang === 'es' ? 'es-ES' : 'en-US');
-    if (voice) utterance.voice = voice;
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-    window.speechSynthesis.speak(utterance);
+  const stopPlayback = () => {
+    audioRef.current?.pause();
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+    audioRef.current = null;
+    setPlayingMessageId(null);
   };
 
-  const stopSpeaking = () => {
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
+  const playMessage = async (id: string, text: string) => {
+    if (playingMessageId === id) {
+      stopPlayback();
+      return;
     }
-    setIsSpeaking(false);
+    stopPlayback();
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const token = localStorage.getItem('keralty_token') || 'test-token';
+      const res = await fetch(`${apiUrl}/api/tts`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify({ text: stripMarkdownForSpeech(text), locale }),
+      });
+      if (!res.ok) throw new Error('TTS request failed');
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      audioUrlRef.current = url;
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = () => stopPlayback();
+      audio.onerror = () => stopPlayback();
+      setPlayingMessageId(id);
+      await audio.play();
+    } catch (e) {
+      console.error('TTS playback failed', e);
+      stopPlayback();
+    }
   };
 
   useEffect(() => {
@@ -206,8 +192,7 @@ export function ChatWindow() {
   };
 
   const handleTranscript = (text: string) => {
-    stopSpeaking();
-    voiceTurnRef.current = true;
+    stopPlayback();
     setInput(text);
     setTimeout(() => formRef.current?.requestSubmit(), 80);
   };
@@ -260,7 +245,6 @@ export function ChatWindow() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      let fullText = '';
 
       let done = false;
       while (!done) {
@@ -277,7 +261,6 @@ export function ChatWindow() {
               try {
                 const data = JSON.parse(dataStr);
                 if (data.type === 'content') {
-                  fullText += data.text;
                   setMessages(prev => prev.map(m =>
                     m.id === assistantId ? { ...m, content: m.content + data.text } : m
                   ));
@@ -302,17 +285,11 @@ export function ChatWindow() {
         m.id === assistantId ? { ...m, isStreaming: false } : m
       ));
       bumpHistoryRefresh();
-
-      if (voiceTurnRef.current && fullText.trim()) {
-        speak(fullText);
-      }
-      voiceTurnRef.current = false;
     } catch (err) {
       console.error(err);
       setMessages(prev => prev.map(m =>
         m.id === assistantId ? { ...m, content: 'Error communicating with the assistant.', isStreaming: false } : m
       ));
-      voiceTurnRef.current = false;
     } finally {
       setLoading(false);
     }
@@ -340,13 +317,27 @@ export function ChatWindow() {
                   ))}
                 </div>
               )}
+              {m.role === 'assistant' && !m.isStreaming && m.content.trim() && (
+                <button
+                  type="button"
+                  onClick={() => playMessage(m.id, m.content)}
+                  title={playingMessageId === m.id ? t('stopReading') : t('readAloud')}
+                  className={`self-start flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-full border transition-colors ${
+                    playingMessageId === m.id
+                      ? 'text-[var(--color-primary)] border-[var(--color-primary)]/40 bg-[var(--color-primary-light)]'
+                      : 'text-[var(--color-text-muted)] border-transparent hover:text-[var(--color-primary)] hover:border-[var(--color-primary)]/20'
+                  }`}
+                >
+                  <Volume2 size={12} className={playingMessageId === m.id ? 'animate-pulse' : ''} />
+                </button>
+              )}
             </div>
           </div>
         ))}
         <div ref={bottomRef} />
       </div>
       {pendingTasks.length > 0 && (
-        <div className="px-4 pb-2 space-y-2">
+        <div className="px-4 pb-2 space-y-2 max-h-[50vh] overflow-y-auto">
           {pendingTasks.map(task => (
             <ApprovalCard
               key={task.task_id}
@@ -369,18 +360,6 @@ export function ChatWindow() {
                 <X size={11} />
               </button>
             </span>
-          </div>
-        )}
-        {isSpeaking && (
-          <div className="flex items-center gap-2 mb-2 px-1">
-            <button
-              type="button"
-              onClick={stopSpeaking}
-              className="flex items-center gap-1.5 text-xs bg-[var(--color-primary-light)] text-[var(--color-primary)] px-2 py-1 rounded-full border border-[var(--color-primary)]/30 hover:bg-[var(--color-primary)]/10 transition-colors"
-            >
-              <Volume2 size={11} className="animate-pulse" />
-              {locale === 'es' ? 'Detener respuesta hablada' : 'Stop spoken reply'}
-            </button>
           </div>
         )}
         <div className="relative flex items-center gap-2">

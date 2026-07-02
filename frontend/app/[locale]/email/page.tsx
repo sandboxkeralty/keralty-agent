@@ -16,6 +16,7 @@ interface TrackedEmail {
   tracking_id: string;
   message_id: string;
   subject?: string;
+  to?: string;
   deadline?: string;
   status: string;
 }
@@ -35,8 +36,28 @@ export default function EmailPage() {
   const [indicators, setIndicators] = useState<EmailIndicators>({ bandeja: 0, criticos: 0, pendientes: 0, seguimiento: 0 });
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'inbox' | 'tracking'>('inbox');
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
+  const [followupResult, setFollowupResult] = useState<Record<string, string>>({});
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
   const getToken = () => typeof window !== 'undefined' ? localStorage.getItem('keralty_token') || 'test-token' : 'test-token';
+
+  const handleGenerateFollowup = async (trackingId: string) => {
+    setGeneratingId(trackingId);
+    setFollowupResult(prev => ({ ...prev, [trackingId]: '' }));
+    try {
+      const res = await fetch(`${apiUrl}/api/email/tracking/${trackingId}/generate-followup`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${getToken()}` },
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || t('followupError'));
+      setFollowupResult(prev => ({ ...prev, [trackingId]: t('followupGenerated') }));
+    } catch (e) {
+      setFollowupResult(prev => ({ ...prev, [trackingId]: e instanceof Error ? e.message : t('followupError') }));
+    } finally {
+      setGeneratingId(null);
+    }
+  };
 
   const fetchSummary = async () => {
     setLoading(true);
@@ -156,16 +177,28 @@ export default function EmailPage() {
               {tracked.map(item => (
                 <li key={item.tracking_id} className="p-4 flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-[var(--color-navy)]">{item.subject || item.message_id}</p>
+                    <p className="text-sm font-medium text-[var(--color-navy)]">{item.subject || t('noSubject')}</p>
+                    {item.to && (
+                      <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{t('to')} {item.to}</p>
+                    )}
                     {item.deadline && (
                       <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{t('due')} {new Date(item.deadline).toLocaleDateString(locale)}</p>
                     )}
+                    {followupResult[item.tracking_id] && (
+                      <p className="text-xs text-[var(--color-primary)] mt-0.5">{followupResult[item.tracking_id]}</p>
+                    )}
                   </div>
                   <button
-                    className="flex items-center gap-1 text-xs px-3 py-1.5 bg-[var(--color-primary)] text-white rounded-[6px] hover:bg-[var(--color-primary-dark)] transition-colors"
-                    onClick={() => {}}
+                    className="flex items-center gap-1 text-xs px-3 py-1.5 bg-[var(--color-primary)] text-white rounded-[6px] hover:bg-[var(--color-primary-dark)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    onClick={() => handleGenerateFollowup(item.tracking_id)}
+                    disabled={generatingId === item.tracking_id}
                   >
-                    <Send className="h-3 w-3" /> {t('generateFollowup')}
+                    {generatingId === item.tracking_id ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <Send className="h-3 w-3" />
+                    )}
+                    {t('generateFollowup')}
                   </button>
                 </li>
               ))}

@@ -14,7 +14,11 @@
     "selectDocuments": "Select documents",
     "agentThinking": "Agent is thinking...",
     "sources": "Sources",
-    "webSources": "External sources"
+    "webSources": "External sources",
+    "readAloud": "Read aloud",
+    "stopReading": "Stop reading",
+    "approve": "Approve",
+    "reject": "Reject"
   },
   "approval": {
     "title": "Review required",
@@ -97,7 +101,11 @@
     "noTracking": "No emails being tracked right now.",
     "trackingHint": "Ask the assistant \"follow up on email X\" to add one.",
     "due": "Due:",
-    "generateFollowup": "Generate follow-up"
+    "generateFollowup": "Generate follow-up",
+    "noSubject": "(No subject)",
+    "to": "To:",
+    "followupGenerated": "Follow-up draft created",
+    "followupError": "Could not generate the follow-up"
   },
   "errors": {
     "networkError": "Connection error. Please check your internet connection.",

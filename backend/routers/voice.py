@@ -19,14 +19,13 @@ WebSocket message protocol (all JSON):
 
 import asyncio
 import base64
-import os
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from google import genai
 from google.genai import types
 
 from config import settings
+from services.genai_client import get_genai_client
 
 router = APIRouter(prefix="/voice", tags=["voice"])
 
@@ -39,29 +38,12 @@ _SYSTEM_INSTRUCTION = (
 _LIVE_AUDIO_MIME = "audio/pcm;rate=16000"
 
 
-def _get_genai_client() -> genai.Client:
-    if os.getenv("GOOGLE_GENAI_USE_VERTEXAI") == "1":
-        return genai.Client(
-            vertexai=True,
-            project=settings.GOOGLE_CLOUD_PROJECT,
-            location=settings.GOOGLE_CLOUD_REGION,
-        )
-    if settings.GOOGLE_API_KEY:
-        return genai.Client(api_key=settings.GOOGLE_API_KEY)
-    # Fall back to Vertex AI ADC
-    return genai.Client(
-        vertexai=True,
-        project=settings.GOOGLE_CLOUD_PROJECT,
-        location=settings.GOOGLE_CLOUD_REGION,
-    )
-
-
 @router.websocket("/stream")
 async def voice_stream(websocket: WebSocket):
     await websocket.accept()
     await _safe_send(websocket, {"type": "status", "message": "connected"})
 
-    client = _get_genai_client()
+    client = get_genai_client()
     # gemini-live-2.5-flash-native-audio is the only GA Live model on Vertex AI, and it only
     # supports AUDIO response modality (TEXT is rejected outright). This app only needs a
     # transcript of what the user said, not a spoken reply, so we request input audio

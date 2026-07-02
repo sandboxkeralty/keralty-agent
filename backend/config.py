@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     GEMINI_PRO_MODEL: str = "gemini-2.5-pro"
     GEMINI_LIVE_MODEL: str = "gemini-live-2.5-flash-native-audio"
     IMAGEN_MODEL: str = "imagen-3.0-generate-001"
+    GEMINI_TTS_MODEL: str = "gemini-2.5-flash-preview-tts"
+    GEMINI_TTS_VOICE: str = "Kore"
 
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""

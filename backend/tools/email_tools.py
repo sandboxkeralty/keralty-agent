@@ -96,10 +96,22 @@ async def email_track(message_id: str, tool_context: ToolContext) -> dict:
         now = datetime.now(timezone.utc)
         tracking_id = str(uuid.uuid4())
         deadline = now + timedelta(days=settings.EMAIL_TRACKING_FOLLOWUP_DAYS)
+
+        # Capture descriptive info (subject/recipient) at tracking time so the
+        # follow-up dashboard never has to show the raw Gmail message_id.
+        subject, to = "", ""
+        try:
+            headers = GmailProvider.get_message_headers(message_id, credentials=_credentials(tool_context))
+            subject, to = headers.get("subject", ""), headers.get("to", "")
+        except Exception as header_err:
+            print(f"[email_track] header lookup failed: {header_err}")
+
         db.collection("email_tracking").document(tracking_id).set({
             "tracking_id": tracking_id,
             "message_id": message_id,
             "user_id": user_id,
+            "subject": subject,
+            "to": to,
             "deadline": deadline,
             "status": "waiting",
             "created_at": now,
@@ -127,41 +139,10 @@ async def email_get_tracking(tool_context: ToolContext) -> dict:
 async def email_generate_followup(tracking_id: str, tool_context: ToolContext) -> dict:
     """Creates a draft follow-up reply for a tracked email."""
     try:
-        from services.firestore import db
-        doc = db.collection("email_tracking").document(tracking_id).get()
-        if not doc.exists:
-            return {"status": "error", "error": f"Tracking record {tracking_id} not found"}
-        tracking = doc.to_dict()
-        message_id = tracking.get("message_id")
-
-        creds = _credentials(tool_context)
-
-        # Look up the original message to recover the recipient, subject and thread.
-        to = ""
-        subject = "Follow-up"
-        thread_id = None
-        try:
-            from services.email.gmail_provider import get_gmail_service, _header
-            svc = get_gmail_service(creds)
-            original = svc.users().messages().get(
-                userId="me", id=message_id, format="metadata",
-                metadataHeaders=["Subject", "To", "From"]
-            ).execute()
-            headers = original.get("payload", {}).get("headers", [])
-            thread_id = original.get("threadId")
-            orig_subject = _header(headers, "Subject")
-            to = _header(headers, "To")
-            subject = orig_subject if orig_subject.lower().startswith("re:") else f"Re: {orig_subject}"
-        except Exception as lookup_err:
-            print(f"[email_generate_followup] original lookup failed: {lookup_err}")
-
-        body = (
-            "Hola,\n\nQuería hacer seguimiento a mi correo anterior. "
-            "Quedo atento a tus comentarios cuando tengas oportunidad.\n\nSaludos cordiales."
-        )
-        draft_id = GmailProvider.create_draft(
-            to=to, subject=subject, body=body, thread_id=thread_id, credentials=creds
-        )
-        return {"status": "success", "draft_id": draft_id}
+        from services.email.followup_service import generate_followup_draft
+        result = generate_followup_draft(tracking_id, credentials=_credentials(tool_context))
+        return {"status": "success", **result}
+    except ValueError as e:
+        return {"status": "error", "error": str(e)}
     except Exception as e:
         return {"status": "error", "error": str(e)}

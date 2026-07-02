@@ -1,8 +1,9 @@
 from datetime import datetime, timezone
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from auth.google_oauth import credentials_from_dict, credentials_to_dict
 from services.firestore import FirestoreService, db
 from services.email.gmail_provider import GmailProvider
+from services.email.followup_service import generate_followup_draft
 
 router = APIRouter(prefix="/api/email", tags=["email"])
 
@@ -75,6 +76,15 @@ def get_email_summary(request: Request):
                 t["deadline"] = t["deadline"].isoformat()
             if "created_at" in t and hasattr(t["created_at"], "isoformat"):
                 t["created_at"] = t["created_at"].isoformat()
+            # Self-heal legacy records tracked before subject/to were captured
+            # at creation time — never show the raw Gmail message_id to the user.
+            if not t.get("subject") and t.get("message_id"):
+                try:
+                    headers = GmailProvider.get_message_headers(t["message_id"], credentials=creds)
+                    t["subject"] = headers.get("subject", "")
+                    t["to"] = headers.get("to", "")
+                except Exception as enrich_err:
+                    print(f"[email summary] tracked subject lookup failed: {enrich_err}")
     except Exception as e:
         print(f"[email summary] tracking fetch failed: {e}")
         tracked = []
@@ -90,3 +100,17 @@ def get_email_summary(request: Request):
             "seguimiento": len(tracked),
         },
     }
+
+
+@router.post("/tracking/{tracking_id}/generate-followup")
+def generate_followup(tracking_id: str, request: Request):
+    user = getattr(request.state, "user", {})
+    user_id = user.get("email") or user.get("uid") or "sandbox-user"
+    creds = _credentials_for_user(user_id)
+    try:
+        result = generate_followup_draft(tracking_id, credentials=creds)
+        return {"status": "success", **result}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Follow-up generation failed: {e}")

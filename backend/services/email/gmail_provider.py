@@ -143,6 +143,26 @@ class GmailProvider:
         return messages
 
     @staticmethod
+    def get_message_headers(message_id: str, credentials=None) -> Dict[str, str]:
+        """Fetches Subject/To/From/threadId for a message without downloading the body.
+
+        Used to enrich tracked-email records with descriptive info (subject, recipient)
+        instead of only ever storing the raw Gmail message_id.
+        """
+        service = get_gmail_service(credentials)
+        msg = service.users().messages().get(
+            userId="me", id=message_id, format="metadata",
+            metadataHeaders=["Subject", "To", "From"]
+        ).execute()
+        headers = msg.get("payload", {}).get("headers", [])
+        return {
+            "subject": _header(headers, "Subject"),
+            "to": _header(headers, "To"),
+            "from": _header(headers, "From"),
+            "thread_id": msg.get("threadId", ""),
+        }
+
+    @staticmethod
     def create_draft(to: str, subject: str, body: str, thread_id: Optional[str] = None, credentials=None) -> str:
         service = get_gmail_service(credentials)
         message = MIMEText(body)

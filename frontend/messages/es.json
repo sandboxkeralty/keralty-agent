@@ -14,7 +14,11 @@
     "selectDocuments": "Seleccionar documentos",
     "agentThinking": "El agente está pensando...",
     "sources": "Fuentes",
-    "webSources": "Fuentes externas"
+    "webSources": "Fuentes externas",
+    "readAloud": "Leer en voz alta",
+    "stopReading": "Detener lectura",
+    "approve": "Aprobar",
+    "reject": "Rechazar"
   },
   "approval": {
     "title": "Revisión requerida",
@@ -97,7 +101,11 @@
     "noTracking": "No hay correos en seguimiento actualmente.",
     "trackingHint": "Pide al asistente \"haz seguimiento del correo X\" para añadirlo.",
     "due": "Vence:",
-    "generateFollowup": "Generar seguimiento"
+    "generateFollowup": "Generar seguimiento",
+    "noSubject": "(Sin asunto)",
+    "to": "Para:",
+    "followupGenerated": "Borrador de seguimiento creado",
+    "followupError": "No se pudo generar el seguimiento"
   },
   "errors": {
     "networkError": "Error de conexión. Por favor verifica tu conexión a internet.",
