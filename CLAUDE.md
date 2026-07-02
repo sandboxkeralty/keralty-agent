@@ -101,6 +101,12 @@ All agents live in `backend/agents/`. The orchestrator's `INSTRUCTION` block in 
 
 **Important ADK constraint**: Gemini's API rejects an agent whose `tools=[...]` list mixes the built-in `google_search` grounding tool with custom Python function tools ("Multiple tools are supported only when they are all search tools"). `ResearchAgent` needs both web search and custom Drive tools, so `google_search` is isolated inside its own single-tool sub-agent (`_web_search_agent` / `WebSearchAgent`, defined inline in `research_agent.py`) and exposed to `ResearchAgent` via `google.adk.tools.agent_tool.AgentTool` — never add `google_search` directly to any agent's `tools=[...]` alongside other tools; wrap it the same way instead.
 
+**Routing is sticky across turns — this drives two prompt-level rules that must be preserved.** ADK's `Runner` routes each new user message to whichever agent authored the *last* event in the session (`_find_agent_to_run`), not back through `OrchestratorAgent` first. Confirmed by reading the installed `google-adk` source: every agent in the hierarchy gets an auto-injected `transfer_to_agent` tool (since none of the 9 `Agent(...)` constructors set `disallow_transfer_to_parent`/`disallow_transfer_to_peers`), so the mechanism to hand control back exists — but nothing forces an agent to use it. Two consequences baked into every agent's `INSTRUCTION` as a result:
+1. Every sub-agent has a `# LÍMITES Y TRANSFERENCIA DE ALCANCE` block instructing it to call `transfer_to_agent(agent_name="OrchestratorAgent")` when a request falls outside its own listed tasks, instead of refusing outright. Without this, once e.g. `EditingAgent` becomes "active," an unrelated later request (e.g. "create a new spreadsheet") goes straight back to `EditingAgent` and it will incorrectly claim it can't do it — a real, previously-shipped bug. Each block also carries an explicit exception for continuations of the *current* flow (`[APROBADO] task_id=...`, a follow-up tweak to content the agent itself just proposed) so the transfer rule doesn't fire mid-approval-flow.
+2. `OrchestratorAgent`'s own instruction explicitly forbids asking the user for permission before delegating ("¿Te parece bien si uso el ResearchAgent...?") — it must announce the plan in one sentence and proceed immediately. This is pure prompt wording, not an ADK behavior; ADK's own auto-injected transfer instructions already tell agents to call the tool directly without asking, so any permission-seeking is the model over-hedging on ambiguous instruction text, not a platform constraint.
+
+If you add a 9th sub-agent, give it the same `# LÍMITES Y TRANSFERENCIA DE ALCANCE` block (see any existing agent file for the exact wording) — it's not optional boilerplate, it's the only thing preventing the sticky-routing trap above.
+
 ### Authentication & OAuth flow
 
 ```
@@ -164,7 +170,9 @@ EditingAgent, VisualAgent, and EmailAgent all use a conversational HITL pattern:
 
 Guardrail in each agent instruction: **NUNCA ejecutes la acción destructiva sin [APROBADO]**.
 
-### Voice pipeline
+`ApprovalCard.tsx`'s diff display and the pending-tasks container both have capped, independently-scrollable heights (`max-h-48`/`max-h-[50vh]` with `overflow-y-auto`) — a long `changes_summary` or several stacked pending tasks used to push the Approve/Reject buttons below the visible viewport in the app's fixed-height, non-page-scrolling layout, with no way to reach them short of browser zoom-out.
+
+### Voice input (speech-to-text)
 
 ```
 Browser mic (getUserMedia 16 kHz mono)
@@ -182,16 +190,23 @@ Browser mic (getUserMedia 16 kHz mono)
       → WebSocket → VoiceChat.tsx accumulates transcript
         → onTranscript callback → ChatWindow sets input + auto-submits form
           → normal /api/chat SSE turn through the full Orchestrator + agents
-            → ChatWindow.speak() reads the finished reply aloud via the
-              browser's native Web Speech API (window.speechSynthesis) —
-              only for turns that started as voice input (voiceTurnRef)
 ```
 
 **Do not set `response_modalities=["TEXT"]` or guess at a different model name for this** — both were tried and both failed in production: `TEXT` modality is rejected outright by the native-audio model (`1007` error), and a guessed model name (`gemini-live-2.5-flash`, without `-native-audio`) doesn't exist in Vertex AI's publisher model catalog at all (`1008` "not found"). The correct mechanism is `input_audio_transcription=types.AudioTranscriptionConfig()` in `LiveConnectConfig`, read back via `message.server_content.input_transcription.text` (`.finished` signals the final chunk) — not `message.text`, which is the model's own generated text and doesn't exist under `AUDIO` modality.
 
-**Spoken replies are speech-to-text-in, full-agent-turn, text-to-speech-out — not a live audio conversation.** `ChatWindow.tsx` speaks the assistant's finished text response via the browser's own `speechSynthesis` API (no backend TTS call, no new dependency) so a voice-initiated question gets a spoken answer back, but the round trip still goes through the complete `/api/chat` SSE pipeline (Orchestrator, all 8 agents, RAG, HITL approvals — everything works exactly as it does for typed input). This deliberately trades true real-time audio-to-audio latency for keeping every existing capability intact. A genuine low-latency live audio-to-audio experience with tool-calling access was scoped but intentionally deferred — see `docs/live-voice-architecture-proposal.md` for what that would require.
+Key files: `frontend/components/chat/VoiceChat.tsx`, `backend/routers/voice.py`.
 
-Key files: `frontend/components/chat/VoiceChat.tsx`, `frontend/components/chat/ChatWindow.tsx` (`speak`/`stopSpeaking`/`voiceTurnRef`), `frontend/public/audio-processor.js`, `backend/routers/voice.py`.
+### Text-to-speech (on-demand "read aloud" — not auto-played)
+
+A voice-initiated turn used to auto-play the assistant's reply via the browser's native `window.speechSynthesis` API — this was removed. Two real problems drove the removal: (1) users didn't want unsolicited audio playback on every voice turn, they wanted a manual control, and (2) `speechSynthesis` voice quality depends entirely on the end user's OS/browser-installed voices, and in practice it would often read Spanish text with an American-English accent since there was no way to guarantee a real Spanish voice was installed.
+
+Replacement: every finished assistant message (not just voice-initiated ones) gets a small speaker icon (`ChatWindow.tsx`, `playMessage`/`stopPlayback`, `playingMessageId` state) that on click calls `POST /api/tts` (`backend/routers/tts.py`) and plays the returned audio via a plain `Audio()`/blob URL — no Web Audio API decoding needed, since the backend wraps the raw PCM in a real WAV header before returning it. Only one message plays at a time; clicking the currently-playing message's icon stops it.
+
+`routers/tts.py` calls Gemini's native TTS (`GEMINI_TTS_MODEL` = `gemini-2.5-flash-preview-tts` by default, `GEMINI_TTS_VOICE` = `Kore`) via `client.aio.models.generate_content(..., response_modalities=["AUDIO"], speech_config=SpeechConfig(voice_config=...))` — confirmed empirically against the real `keraltysandbox` project that **both** the Vertex AI path and the API-key path serve this model (Vertex support for `-preview-tts` models isn't documented, only verified by testing). Gemini's TTS is multilingual and auto-detects the input language from the text itself, so the same voice persona correctly pronounces Spanish and English — there's no "Spanish voice" to pick, unlike OS voices. Response audio is `audio/L16;codec=pcm;rate=24000` (confirmed via the real API response's `inline_data.mime_type`, not hardcoded — the endpoint parses the actual rate out of that field with a 24kHz fallback) which gets wrapped via stdlib `wave` into a proper `.wav` before the response leaves the backend.
+
+`backend/services/genai_client.py` holds the shared `get_genai_client()` helper (Vertex-if-`GOOGLE_GENAI_USE_VERTEXAI=1`, else API-key-if-`GOOGLE_API_KEY`, else Vertex ADC fallback) — extracted from `routers/voice.py` so both the Live API (STT) and `routers/tts.py` use one client-selection implementation instead of two copies.
+
+**Gemini 2.5 Flash's "thinking" tokens count against `max_output_tokens` — always set `thinking_config=types.ThinkingConfig(thinking_budget=0)` on short, direct calls (classification, drafting) unless you specifically want chain-of-thought reasoning.** Without it, a real call in this codebase came back with `finish_reason=MAX_TOKENS` and a 4-word truncated response — the model spent nearly the entire token budget on invisible reasoning before it could emit any visible text (confirmed via `response.candidates[0].finish_reason` and `usage_metadata.thoughts_token_count`). This bit both `services/email/followup_service.py` and `services/email/triage_service.py` (see Gmail/Email agent section below) and is a real risk for *any* new short-output Gemini call added to this codebase — the RAG pipeline's `_rewrite_queries`/`reranker.py` calls predate this fix and were not revisited, so they carry the same latent risk if their outputs ever start looking truncated.
 
 ### RAG / Knowledge Base pipeline
 
@@ -226,10 +241,23 @@ Ingestion endpoint: `POST /knowledge/documents` (50 MB limit, admin-gated). Mana
 - `search_threads` — Gmail query syntax
 - `create_draft` — with optional thread_id for replies
 - `send_draft`, `get_draft`
+- `get_message_headers(message_id, credentials)` — lightweight metadata-only fetch (Subject/To/From/threadId/snippet); powers both the tracking-record enrichment and the follow-up personalization below, so it's the one place that knows how to cheaply look up "what was this message about" without downloading the full body
 
-`tools/email_tools.py` — all 9 functions call `GmailProvider` with `_credentials(tool_context)`. `email_track` writes to Firestore `email_tracking`. EmailAgent has mandatory HITL before `email_send`.
+`tools/email_tools.py` — all 9 functions call `GmailProvider` with `_credentials(tool_context)`. EmailAgent has mandatory HITL before `email_send`.
 
-**Email dashboard** (`GET /api/email/summary`, `routers/email.py`, mounted at `/api/email` so it's covered by the standard `/api/` auth check — no `auth_middleware` change needed for it): a plain REST endpoint, not an ADK tool, so it can't use `tool_context` — it has its own small `_credentials_for_user(user_id)` helper that mirrors `tools/_auth.py`'s load-refresh-repersist logic but is keyed directly off `request.state.user`. Returns `inbox_today` (via `GmailProvider.search_threads("in:inbox after:YYYY/MM/DD", ...)`, deduped by `thread_id`), `tracked` (the same `email_tracking` Firestore query `email_get_tracking` uses), and `indicators` (`bandeja`/`criticos`/`pendientes`/`seguimiento` — "críticos" maps to Gmail's own `is:important`, "pendientes" to `is:unread`; no invented heuristic). `frontend/app/[locale]/email/page.tsx` calls this on mount and on the "Actualizar" button — it used to just POST a fire-and-forget chat message and discard the response.
+`email_track(message_id)` writes to Firestore `email_tracking` — and, as of this cycle, also calls `get_message_headers` to capture `subject`/`to` at tracking time, so the follow-up dashboard has real descriptive info to show instead of a bare Gmail `message_id` (that used to be the only thing stored, and the dashboard would literally render the raw ID as the item's title).
+
+**`services/email/followup_service.py`** — `generate_followup_draft(tracking_id, credentials)` is the single shared implementation behind both `email_generate_followup` (the ADK tool, has a `tool_context`) and the REST endpoint below (has `request.state.user` instead) — the draft-creation logic doesn't otherwise differ between the two callers, so it lives here once. As of this cycle the follow-up body is generated by Gemini (`GEMINI_FLASH_MODEL`, `thinking_budget=0` — see Text-to-speech section above for why that matters) using the original message's subject/snippet, instead of a hardcoded template string; falls back to the old generic template if the LLM call fails for any reason. Returns `{draft_id, subject, to, body}` — the frontend shows the actual generated `subject`/`body` inline rather than a bare "created" message.
+
+**`services/email/triage_service.py`** — `classify_priority(threads)` takes a list of thread dicts (`from`/`subject`/`snippet`, the same shape `search_threads` already returns) and returns one `CRITICO`/`ALTO`/`MEDIO`/`BAJO` label per thread via a single batched Gemini call (same "one prompt, N candidates, parse a same-length JSON array" pattern as `services/rag/reranker.py`), reusing the exact rubric `EmailAgent`'s own chat instruction already defines (board/regulator senders, deadline keywords, meeting requests, stale threads, newsletters). Falls back to `MEDIO` for every item on any failure — a triage outage never breaks the rest of the dashboard. This exists because the dashboard's "Críticos" tile used to just relay Gmail's generic `is:important` flag, which isn't the same thing as the agent's own priority judgment and doesn't showcase any actual AI reasoning.
+
+**Email dashboard** (`GET /api/email/summary`, `routers/email.py`, mounted at `/api/email` so it's covered by the standard `/api/` auth check — no `auth_middleware` change needed for it): a plain REST endpoint, not an ADK tool, so it can't use `tool_context` — it has its own small `_credentials_for_user(user_id)` helper that mirrors `tools/_auth.py`'s load-refresh-repersist logic but is keyed directly off `request.state.user`. Returns `inbox_today` (deduped by `thread_id`, each item enriched with a `priority` field from `triage_service`), `tracked`, `indicators` (`bandeja`/`criticos`/`pendientes`/`seguimiento`), and `warnings` (a list of which sub-fetches failed, if any — added because every fetch used to fail silently into `0`/`[]`, making a real Gmail-token failure indistinguishable from a genuinely empty inbox; the frontend shows an inline banner when this is non-empty).
+
+**Timezone handling — accepts a `tz` query param, an IANA name like `America/Bogota`.** `frontend/app/[locale]/email/page.tsx` sends `Intl.DateTimeFormat().resolvedOptions().timeZone` (the browser's live local timezone — wherever the executive is actually logged in from *right now*, not a fixed Keralty HQ zone) on every `fetchSummary()` call. The backend's `_local_midnight_epoch(tz)` computes local midnight via stdlib `zoneinfo.ZoneInfo` and converts to a Unix epoch second, then queries Gmail with `after:<epoch>` instead of a `YYYY/MM/DD` string. This matters: the old implementation computed "today" from `datetime.now(timezone.utc)` and handed Gmail a bare date string — for any executive west of UTC (all of Keralty's actual LatAm operating countries), UTC rolls over to the next calendar day several hours before local midnight, so mail received in the evening would silently vanish from **Bandeja**/**Críticos**/**Pendientes** for that whole window. Gmail's `after:`/`before:` operators accepting raw epoch seconds is not prominently documented — confirmed empirically (a query with a deliberately-future epoch correctly returned zero results) rather than assumed. `tz` falls back to UTC if missing or invalid (`ZoneInfoNotFoundError` is caught).
+
+`POST /api/email/tracking/{tracking_id}/generate-followup` — the dashboard's "Generar seguimiento" button used to be a literal no-op (`onClick={() => {}}`); this endpoint wraps `followup_service.generate_followup_draft` for REST callers. Draft-only, same as `email_draft` — no HITL gate needed since nothing is sent, matching the tool's existing security model.
+
+`frontend/app/[locale]/email/page.tsx` calls `GET /api/email/summary?tz=...` on mount and on the "Actualizar" button.
 
 ### Google Slides write operations
 
@@ -286,7 +314,7 @@ Paperclip button in `ChatWindow.tsx` opens `<DocumentPicker>` modal (component a
 
 `routers/chat.py` streams ADK events as `text/event-stream`. ADK `Part` objects always have a `.text` attribute (Pydantic field defaulting to `None`), so the guard must be `if p.text is not None:` — **not** `if hasattr(p, "text"):`.
 
-Chat messages are rendered as Markdown in the frontend using `react-markdown` + `remark-gfm`, so agent responses with links, tables, headings and lists display correctly.
+Chat messages are rendered as Markdown in the frontend using `react-markdown` + `remark-gfm`, so agent responses with links, tables, headings and lists display correctly. `ChatWindow.tsx` passes a custom `a` renderer (`MarkdownLink`, alongside the existing `img: MarkdownImage`) so every link in an agent response — the Docs/Sheets/Slides URLs `docs_create`/`create_spreadsheet`/`slides_create` return, in particular — opens with `target="_blank" rel="noopener noreferrer"` instead of navigating the user away from the app in the same tab.
 
 ### Feature flags
 

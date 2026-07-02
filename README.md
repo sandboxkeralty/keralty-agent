@@ -24,9 +24,14 @@ Deployed on Google Cloud Run in the `keraltysandbox` GCP project (`us-central1`)
 - **Searches and reasons over a corporate Knowledge Base** — a hybrid BM25 + dense-embedding
   retrieval pipeline with Gemini reranking and an abstention gate, so the assistant says "I
   don't know" instead of guessing.
-- **Manages email** — reads, triages, drafts, and sends via Gmail (approval-gated sends), with
-  follow-up tracking and a live dashboard of today's inbox and pending items.
-- **Talks back** — a real-time voice conversation mode via the Gemini Live API.
+- **Manages email** — reads, triages, drafts, and sends via Gmail (approval-gated sends). The
+  executive email dashboard shows AI-derived priority (not just Gmail's generic flags) on
+  today's inbox, honestly reports when a fetch fails instead of showing false zeros, and
+  generates a real, topic-aware follow-up draft — shown inline — with one click. "Today" is
+  computed in the executive's own current timezone, wherever they're logged in from.
+- **Voice input, and spoken replies on demand** — speak a request via the Gemini Live API, and
+  click any reply to hear it read aloud with Gemini's own multilingual text-to-speech (not the
+  browser's built-in voices, which are inconsistent and often mispronounce Spanish).
 - **Generates images** — Imagen 3, downloadable directly from the chat.
 - **Researches the web and internal documents together** — one agent that combines Google
   Search grounding with internal Drive search in a single response.
@@ -74,7 +79,7 @@ flowchart TB
     subgraph Google["Google Cloud & Workspace"]
         direction LR
         Workspace["Drive · Docs · Sheets<br/>Slides · Gmail"]
-        VertexAI["Vertex AI<br/>Gemini · Imagen 3<br/>Live API"]
+        VertexAI["Vertex AI<br/>Gemini · Imagen 3<br/>Live API · TTS"]
         Firestore[("Firestore<br/>sessions · messages · tasks<br/>users · audit_events")]
         GCS[("Cloud Storage<br/>images/ · kb/")]
     end
@@ -124,7 +129,7 @@ sequenceDiagram
 | Agent orchestration | Google Agent Development Kit (ADK), Gemini 2.5 Flash/Pro |
 | Backend | FastAPI, Python 3.11, Uvicorn |
 | Frontend | Next.js 15 (App Router, Turbopack), TypeScript, Tailwind CSS v4 |
-| AI models | Gemini 2.5 Flash/Pro, Gemini Live API, Imagen 3, text-embedding-005 |
+| AI models | Gemini 2.5 Flash/Pro, Gemini Live API, Gemini TTS, Imagen 3, text-embedding-005 |
 | Retrieval | rank-bm25 (sparse) + Vertex AI embeddings (dense), Reciprocal Rank Fusion |
 | Data | Firestore (sessions, messages, tasks, KB chunks, audit log), Cloud Storage |
 | Auth | Google OAuth 2.0 (PKCE) + JWT (python-jose) |
@@ -204,7 +209,7 @@ GCP infrastructure inventory.
 ```
 backend/
   agents/          Orchestrator + 8 specialised ADK agents
-  routers/         FastAPI routes (auth, chat, email, history, admin, knowledge, voice, tasks)
+  routers/         FastAPI routes (auth, chat, email, history, admin, knowledge, voice, tts, tasks)
   tools/           ADK tool functions the agents call (Workspace, email, RAG, images)
   services/        Google API clients, Firestore access, and the RAG pipeline
   services/rag/    Chunking, embedding, retrieval, reranking

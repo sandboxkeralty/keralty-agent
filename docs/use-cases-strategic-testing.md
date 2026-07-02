@@ -205,10 +205,15 @@ shown with the full content, and `email_send` only fires after `[APROBADO]` — 
 3. Open the **Correo Ejecutivo** page and check the "Seguimiento" tab and indicator.
 
 **Expected result:** A tracking record is created; it's retrievable via chat and via the live
-dashboard indicator, consistently.
+dashboard indicator, consistently. The dashboard's "Seguimiento" tab shows the **real subject
+and recipient** of the tracked email (e.g. "test - urgent" / "Para: ...") — never the raw
+Gmail message ID. This works even for records tracked before this behavior existed: the
+dashboard self-heals by looking the subject up live from Gmail if it's missing from the stored
+record.
 
-**Validates:** `email_track`/`email_get_tracking`, `/api/email/summary`'s `seguimiento` count,
-the `email_tracking` Firestore collection.
+**Validates:** `email_track`/`email_get_tracking` (now capturing `subject`/`to` at tracking
+time via `GmailProvider.get_message_headers`), `/api/email/summary`'s self-healing enrichment
+for legacy records, the `email_tracking` Firestore collection.
 
 ---
 
@@ -218,12 +223,24 @@ the `email_tracking` Firestore collection.
 1. Open **Correo Ejecutivo**.
 2. Check that **Bandeja**, **Críticos**, **Pendientes**, and **Seguimiento** show real numbers,
    not placeholders.
-3. Click **Actualizar**.
+3. In the **Bandeja de Entrada** tab, confirm each email shows a small colored priority badge
+   (CRÍTICO / ALTO / MEDIO / BAJO) next to the sender — not just Gmail's generic flags.
+4. Click **Actualizar**, ideally while your system clock/timezone is set somewhere other than
+   Colombia, to confirm "today" reflects *your* current local day rather than a fixed timezone.
 
-**Expected result:** All four indicators populate from real Gmail queries (today's inbox,
-`is:important`, `is:unread`) and the Firestore tracking collection — not hardcoded `'—'` values.
+**Expected result:** All four indicators populate from real Gmail queries and the Firestore
+tracking collection — not hardcoded `'—'` values — and reflect your own current calendar day
+regardless of where you're logged in from (the frontend sends your browser's live timezone on
+every request). Each inbox item's priority badge reflects the same CRÍTICO/ALTO/MEDIO/BAJO
+judgment the chat-based EmailAgent uses, not just Gmail's `is:important` flag — items should be
+visibly differentiated (a real "urgente" request should not carry the same badge as a casual
+greeting). If any part of the fetch fails (e.g. an expired token), an orange warning banner
+appears above the tabs instead of the tiles silently showing "0".
 
-**Validates:** `GET /api/email/summary`, the credential-loading helper for plain REST endpoints.
+**Validates:** `GET /api/email/summary?tz=...`, timezone-correct epoch-based Gmail queries
+(`_local_midnight_epoch`), `services/email/triage_service.py`'s batched Gemini classification,
+the `warnings` field and its frontend banner, the credential-loading helper for plain REST
+endpoints.
 
 ---
 
@@ -329,3 +346,76 @@ succeeds — update this document if so).
 assistant matches whichever language the user writes in, independent of the UI locale toggle.
 
 **Validates:** `next-intl` locale routing, the orchestrator's language-matching instruction.
+
+---
+
+## 20. Generating a follow-up draft directly from the dashboard
+
+**Executive context:** The CEO is scanning the "Seguimiento" tab between meetings and wants to
+nudge someone without opening Gmail or starting a chat conversation.
+
+**Steps:**
+1. Open **Correo Ejecutivo → Seguimiento**.
+2. Click **Generar seguimiento** on any tracked item.
+
+**Expected result:** A real Gmail draft is created (threaded to the original conversation), and
+the actual generated subject and body appear inline on the dashboard immediately — not just a
+generic "created" confirmation. The body should read as a genuine, topic-aware follow-up
+referencing the original email's subject, not a generic canned template repeated verbatim
+across different tracked items. No email is sent — this only ever creates a draft, matching the
+same security model as `email_draft` (nothing sends without a separate, explicit approval).
+
+**Validates:** `POST /api/email/tracking/{id}/generate-followup`,
+`services/email/followup_service.py`'s Gemini-personalized body generation, that
+`thinking_config=ThinkingConfig(thinking_budget=0)` is actually applied (without it, this call
+previously returned a response truncated to a few words).
+
+---
+
+## 21. Delegating without asking permission, and switching tasks mid-conversation
+
+**Executive context:** The CEO gives the assistant a multi-step request, then — in the same
+conversation — asks for something completely unrelated to what the last agent was doing.
+
+**Steps:**
+1. *"Busca información sobre energías renovables en Colombia y luego crea un resumen ejecutivo
+   con eso."*
+2. Observe the assistant's first response.
+3. In a **later message in the same session**, after the assistant has been doing something
+   narrow (e.g. editing a specific document), ask for something unrelated to that agent's job —
+   e.g. if it was just editing a Doc, ask it to create a brand-new spreadsheet instead.
+
+**Expected result:** Step 2: the assistant announces its plan in one sentence (e.g. "Voy a usar
+ResearchAgent para buscar fuentes externas y luego AnalysisAgent...") and proceeds immediately
+— it must **not** ask "¿te parece bien si...?" or otherwise wait for permission to pick which
+agent to use. Step 3: the assistant must **not** claim it lacks the capability (e.g. "no puedo
+crear hojas de cálculo nuevas" would be wrong if the request just needs a different agent) — it
+should hand off to the correct agent and actually attempt the new task.
+
+**Validates:** the orchestrator's "announce and proceed, never ask permission to delegate"
+instruction, and every sub-agent's `# LÍMITES Y TRANSFERENCIA DE ALCANCE` block that hands
+control back to `OrchestratorAgent` instead of refusing — this specifically guards against
+ADK's sticky turn-routing (the next message goes to whichever agent handled the last one, not
+back through the orchestrator by default).
+
+---
+
+## 22. Hearing a reply read aloud
+
+**Executive context:** The CEO is reviewing replies hands-free while doing something else and
+wants to hear a specific answer instead of re-reading it.
+
+**Steps:**
+1. Ask the assistant anything and wait for a finished (non-streaming) reply.
+2. Click the small speaker icon under the assistant's message.
+3. While it's playing, click the speaker icon on a **different** message.
+
+**Expected result:** Clicking the icon plays real generated audio — genuine, natural-sounding
+speech in the message's actual language (Spanish text should sound like Spanish, not an
+American accent reading Spanish phonetically). Nothing plays automatically; playback only ever
+starts on click, for any message (not just ones that started as a voice question). Step 3 stops
+the first message's audio and starts the second — only one message plays at a time.
+
+**Validates:** `POST /api/tts`, Gemini's native multilingual TTS (`GEMINI_TTS_MODEL`), that the
+backend correctly wraps the raw PCM response in a playable WAV file, and the per-message
+`playingMessageId` state in `ChatWindow.tsx`.
