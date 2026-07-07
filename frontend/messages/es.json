@@ -31,7 +31,12 @@
     "picker": "Seleccionar de Google Drive",
     "search": "Buscar documentos...",
     "maxSelected": "Máximo 5 documentos seleccionados",
-    "selected": "{count} documento(s) seleccionado(s)"
+    "selected": "{count} documento(s) seleccionado(s)",
+    "uploadFromDevice": "Subir desde el dispositivo",
+    "selectFromDrive": "Seleccionar de Google Drive",
+    "uploadFailed": "Error al subir el archivo",
+    "uploading": "Subiendo...",
+    "formatsHelp": "Formatos admitidos: PDF, DOCX, TXT, CSV, MD — máx. 50 MB"
   },
   "sidebar": {
     "today": "Hoy",

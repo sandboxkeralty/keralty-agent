@@ -127,7 +127,7 @@ POST /api/chat → middleware verifies JWT → request.state.user = {uid, email}
 
 Key files:
 - `backend/auth/google_oauth.py` — OAuth flow helpers + `_flow_cache` (PKCE state preservation)
-- `backend/auth/auth_middleware.py` — JWT verification; falls back to `sandbox-user` for `test-token`. Only authenticates paths matching `_AUTHENTICATED_PREFIXES = ("/api/", "/admin", "/knowledge", "/history")` — **`/documents` and the `/voice` WebSocket route are deliberately excluded** (see notes below; don't add `/documents` here without also fixing its frontend caller, which sends no `Authorization` header today).
+- `backend/auth/auth_middleware.py` — JWT verification; falls back to `sandbox-user` for `test-token`. Only authenticates paths matching `_AUTHENTICATED_PREFIXES = ("/api/", "/admin", "/knowledge", "/history", "/documents")` — **the `/voice` WebSocket route is deliberately excluded** (see `routers/voice.py`; WebSocket auth would need a different mechanism than the header-based check here).
 - `backend/routers/auth.py` — `/auth/login` and `/auth/callback`
 - `backend/routers/chat.py` — loads Firestore creds, injects into ADK session state; also persists messages
 - `backend/tools/_auth.py` — `_credentials(tool_context)` helper: extracts creds, refreshes if expired, re-persists to Firestore
@@ -141,7 +141,7 @@ Required Cloud Run env vars: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE
 
 **Token auto-refresh**: `tools/_auth.py` checks `creds.expired`, calls `creds.refresh(GRequest())`, and re-persists updated tokens to Firestore. No silent 401s.
 
-**Note**: `routers/documents.py` (`GET /documents/`) does not thread user credentials — it uses ADC only. Files listed via this endpoint must be accessible by the service account. This is a known, tracked gap — the DocumentPicker (paperclip in chat) can't find a user's own files as a result. See `docs/product-roadmap-new-features.md` (Tier 0.4) before fixing; it's deliberately excluded from `auth_middleware`'s authenticated paths because `DocumentPicker.tsx` sends no `Authorization` header today, so adding auth there without also fixing the frontend call would 401 it outright.
+**`routers/documents.py` now threads real user OAuth credentials**, same as every other REST router that needs Google API access. A private `_credentials_for_user(user_id)` (mirroring `routers/email.py`'s helper of the same name — Firestore load → `credentials_from_dict` → refresh-if-expired → re-persist) is called via `_creds_from_request(request)` in all three Drive routes. This used to be a known, tracked gap (the DocumentPicker in chat always returned "No documents found," since it silently fell back to ADC — the service account owns none of a real user's files) — fixed by moving three things together in one change: adding `/documents` to `_AUTHENTICATED_PREFIXES` above, wiring `credentials=` into every `DriveService` call in `documents.py`, and adding the missing `Authorization` header to `DocumentPicker.tsx`'s fetch (it was the only authenticated-looking call in the whole frontend that omitted it). All three had to land together — gating `/documents` behind auth without the frontend header fix would have turned "always empty" into "always 401."
 
 ### Google Sheets tools & Drive search
 
@@ -308,9 +308,14 @@ Composite Firestore indexes actually required (mismatches here silently 500 ever
 
 All admin endpoints gated on `ADMIN_PANEL_ENABLED=true` (this is the **only** gate — there is no per-user role check anywhere in the backend; `request.state.user` never carries a `role`, and Firestore `users.role` is an unenforced free-text field). Once the flag is on, every authenticated user gets full admin access. The deployed Cloud Run backend currently has this flag set to `true` via `--update-env-vars` (the code default in `config.py` is `false`) — check the live env var, not just the code default, before assuming the panel is inaccessible. See `docs/product-roadmap-new-features.md` (Tier 0.1) for the planned RBAC work.
 
-### DocumentPicker in chat
+### Attaching documents in chat (Drive + local upload)
 
-Paperclip button in `ChatWindow.tsx` opens `<DocumentPicker>` modal (component at `components/documents/DocumentPicker.tsx`). Selected file text is fetched from `GET /documents/{file_id}/text` and sent as `attached_context` in the chat request body. `routers/chat.py` injects it into `session.state["attached_documents"]` before running the agent.
+Paperclip button in `ChatWindow.tsx` opens `<AttachMenu>` (`components/documents/AttachMenu.tsx`), a small two-row menu: "Upload from device" and "Google Drive." Both sources converge on the same `attachedDoc: { file: DriveFile; text: string } | null` state and the same chip UI — a locally uploaded file is wrapped in a synthetic `DriveFile`-shaped object (`id: "local:<timestamp>"`) so no downstream code needs to know which source it came from.
+
+- **Google Drive**: selecting "Google Drive" opens the existing `<DocumentPicker>` modal; selected file text is fetched from `GET /documents/{file_id}/text`.
+- **Local upload**: selecting "Upload from device" triggers a hidden `<input type="file">` (`accept=".pdf,.docx,.doc,.txt,.csv,.md"`), which posts to `POST /documents/upload` — a lightweight endpoint that runs the file through `services/rag/ingestion.py`'s `extract_text()` and returns `{filename, text}`. **Deliberately does not use `POST /knowledge/documents`** — that endpoint is admin-gated and permanently indexes into the org-wide Knowledge Base; a one-off chat attachment must not leak into that. 50 MB cap, same allowed types as KB ingestion (`pdf`, `docx`, `doc`, `txt`, `csv`, `md`), errors surface inline as `uploadError` (415 unsupported type, 413 oversized, 422 empty/unextractable).
+
+Either way, the resulting text is sent as `attached_context` in the chat request body. `routers/chat.py` injects it directly into the `new_message` parts sent to `runner.run_async` (prefixed `[Documento adjunto]`), capped at 8000 chars — **this must be a message part, not just `session.state["attached_documents"]`**. An earlier version only wrote it to session state and never read it back out anywhere (no agent instruction or tool referenced that key), so attaching a document silently never reached the model at all, for either source — confirmed by testing the full round-trip, not assumed. `attachedDoc` is cleared after a successful send (fixed alongside this — it previously wasn't, so every subsequent turn re-appended the same text into session state, growing it unboundedly for the whole session).
 
 ### SSE streaming
 
@@ -354,8 +359,7 @@ RAG pipeline knobs in `config.py`: `RAG_CHUNK_TARGET_TOKENS` (800), `RAG_CHUNK_M
 | IAP authentication | `backend/auth/iap.py` | Empty stub — not needed unless deploying behind Cloud IAP |
 | Backend i18n | `backend/i18n/` | All three files empty — frontend uses `next-intl` independently; backend never sends localised strings |
 | No role-based access control | `auth/auth_middleware.py`, `routers/admin.py` | `ADMIN_PANEL_ENABLED` is a single global flag with no per-user role check; anyone gets full admin access once it's on, or none at all |
-| DocumentPicker credential threading | `routers/documents.py` | Uses ADC only, never the logged-in user's OAuth credentials — can't see a user's own Drive files. Deliberately excluded from `auth_middleware`'s authenticated paths (see Google Workspace API access section) |
-| Audit logging — slides & KB | `tools/slides_tools.py`, `routers/knowledge.py` | `slides_create` and KB document ingestion are not logged to `audit_events`; all other write operations (docs, sheets, email, HITL) are |
+| Audit logging — slides & KB & local uploads | `tools/slides_tools.py`, `routers/knowledge.py`, `routers/documents.py` | `slides_create`, KB document ingestion, and `POST /documents/upload` are not logged to `audit_events`; all other write operations (docs, sheets, email, HITL) are |
 | RAG generation guardrails E10–E16 | _(no code file)_ | Chain-of-verification, entity consistency, timeline/numeric checks delegated to agent prompt instructions, not implemented as callable tools |
 | Outlook email provider | `backend/services/email/outlook_provider.py` | Empty stub — Azure OAuth vars defined in config but provider not implemented; there is also no Outlook-equivalent of `auth/google_oauth.py` yet, so this is a full OAuth-flow build, not just a provider |
 | Email package scaffolding | `backend/services/email/{__init__,base,factory}.py` | All empty — only `gmail_provider.py` is implemented |

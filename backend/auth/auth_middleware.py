@@ -2,7 +2,7 @@ from fastapi import Request
 from fastapi.responses import JSONResponse
 from typing import Callable, Awaitable
 
-_AUTHENTICATED_PREFIXES = ("/api/", "/admin", "/knowledge", "/history")
+_AUTHENTICATED_PREFIXES = ("/api/", "/admin", "/knowledge", "/history", "/documents")
 
 async def auth_middleware(request: Request, call_next: Callable[[Request], Awaitable[JSONResponse]]):
     if request.method == "OPTIONS":

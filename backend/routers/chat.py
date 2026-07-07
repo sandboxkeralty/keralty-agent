@@ -83,9 +83,20 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
             except Exception:
                 pass
 
+            # The attached document's text must be part of the actual message sent
+            # to the model — session.state["attached_documents"] above is bookkeeping
+            # only, nothing reads it back out, so without this the model never sees
+            # what the user attached.
+            message_parts = []
+            if body.attached_context:
+                message_parts.append(types.Part.from_text(
+                    text=f"[Documento adjunto]\n{body.attached_context[:8000]}"
+                ))
+            message_parts.append(types.Part.from_text(text=body.message))
+
             full_response = ""
             async for event in runner.run_async(
-                new_message=types.Content(role="user", parts=[types.Part.from_text(text=body.message)]),
+                new_message=types.Content(role="user", parts=message_parts),
                 session_id=body.session_id,
                 user_id=user_id,
             ):

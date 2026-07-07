@@ -23,7 +23,10 @@ export function DocumentPicker({ onSelect }: { onSelect: (file: DriveFile) => vo
     try {
       // Note: NEXT_PUBLIC_API_URL should be used instead of hardcoding localhost
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const res = await fetch(`${apiUrl}/documents?q=${encodeURIComponent(q)}`);
+      const token = localStorage.getItem('keralty_token') || 'test-token';
+      const res = await fetch(`${apiUrl}/documents?q=${encodeURIComponent(q)}`, {
+        headers: { 'Authorization': `Bearer ${token}` },
+      });
       const data = await res.json();
       setFiles(data.files || []);
     } catch (err) {

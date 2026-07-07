@@ -2,12 +2,13 @@
 
 import { useState, useRef, useEffect } from 'react';
 import type { AnchorHTMLAttributes, ImgHTMLAttributes } from 'react';
-import { Send, Bot, User, Paperclip, X, Download, Volume2 } from 'lucide-react';
+import { Send, Bot, User, Paperclip, X, Download, Volume2, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { SourceChip } from './SourceChip';
 import { ApprovalCard } from './ApprovalCard';
 import { DocumentPicker, DriveFile } from '../documents/DocumentPicker';
+import { AttachMenu } from '../documents/AttachMenu';
 import { VoiceChat } from './VoiceChat';
 import { useTranslations, useLocale } from 'next-intl';
 import { useChatSession, ChatMessage } from '@/hooks/useChatSession';
@@ -88,16 +89,21 @@ interface PendingTask {
 
 export function ChatWindow() {
   const t = useTranslations('chat');
+  const td = useTranslations('documents');
   const locale = useLocale();
   const { sessionId, messages, setMessages, bumpHistoryRefresh } = useChatSession();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
+  const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
   const [attachedDoc, setAttachedDoc] = useState<{ file: DriveFile; text: string } | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
 
@@ -201,6 +207,36 @@ export function ChatWindow() {
     }
   };
 
+  const handleLocalUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    setShowAttachMenu(false);
+    if (!file) return;
+    setUploading(true);
+    setUploadError('');
+    try {
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+      const token = localStorage.getItem('keralty_token') || 'test-token';
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`${apiUrl}/documents/upload`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` },
+        body: form,
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || td('uploadFailed'));
+      setAttachedDoc({
+        file: { id: `local:${Date.now()}`, name: data.filename, mimeType: file.type || 'application/octet-stream' },
+        text: data.text,
+      });
+    } catch (err: unknown) {
+      setUploadError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
   const handleTranscript = (text: string) => {
     stopPlayback();
     setInput(text);
@@ -294,6 +330,7 @@ export function ChatWindow() {
       setMessages(prev => prev.map(m =>
         m.id === assistantId ? { ...m, isStreaming: false } : m
       ));
+      setAttachedDoc(null);
       bumpHistoryRefresh();
     } catch (err) {
       console.error(err);
@@ -372,16 +409,27 @@ export function ChatWindow() {
             </span>
           </div>
         )}
+        {uploadError && (
+          <div className="mb-2 px-1 text-xs text-red-500">{uploadError}</div>
+        )}
         <div className="relative flex items-center gap-2">
           <div className="relative flex-1 flex items-center">
             <button
               type="button"
-              onClick={() => setShowPicker(p => !p)}
-              className="absolute left-3 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] transition-colors z-10"
+              onClick={() => setShowAttachMenu(p => !p)}
+              disabled={uploading}
+              className="absolute left-3 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] transition-colors z-10 disabled:opacity-50"
               title="Adjuntar documento"
             >
-              <Paperclip size={16} />
+              {uploading ? <Loader2 size={16} className="animate-spin" /> : <Paperclip size={16} />}
             </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.docx,.doc,.txt,.csv,.md"
+              onChange={handleLocalUpload}
+              className="hidden"
+            />
             <input
               type="text"
               className="w-full pl-10 pr-20 py-3 rounded-full border border-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 text-sm"
@@ -402,6 +450,20 @@ export function ChatWindow() {
             </div>
           </div>
         </div>
+        {showAttachMenu && (
+          <div className="absolute bottom-20 left-4 z-50 shadow-xl rounded-[12px] overflow-hidden">
+            <AttachMenu
+              onUploadClick={() => {
+                setShowAttachMenu(false);
+                fileInputRef.current?.click();
+              }}
+              onDriveClick={() => {
+                setShowAttachMenu(false);
+                setShowPicker(true);
+              }}
+            />
+          </div>
+        )}
         {showPicker && (
           <div className="absolute bottom-20 left-4 z-50 shadow-xl rounded-[12px] overflow-hidden">
             <DocumentPicker onSelect={handleSelectDoc} />
