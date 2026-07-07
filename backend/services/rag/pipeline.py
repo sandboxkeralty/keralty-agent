@@ -6,13 +6,14 @@ Stages:
   3. Neighbor expansion       (E3)    — pull ±1 chunk around top results
   4. Gemini rerank            (E7/E8) — dynamic cutoff, recall preservation
   5. Coverage check           (E9)    — abstain when concept recall < threshold
-  6. Context assembly                 — build [[filename:pN]] citation blocks
+  6. Context assembly                 — build (Document Name, p.N) citation blocks
 
 The KnowledgeAgent system prompt enforces the remaining generation guardrails
 (E10-E16): citation enforcement, grounding, completeness, entity consistency.
 """
 
 import os
+import re
 import json
 from dataclasses import dataclass, field
 from typing import List, Optional
@@ -84,6 +85,19 @@ def _concept_recall(chunks: list, query: str) -> float:
     return sum(1 for w in keywords if w in combined) / len(keywords)
 
 
+def _humanize_filename(filename: str) -> str:
+    """Turns a raw uploaded filename into a professional display name.
+
+    'keralty_exhaustivo.md' -> 'Keralty Exhaustivo'. Strips the extension and
+    underscore/dash separators so citations never leak raw filenames to the user.
+    """
+    stem = re.sub(r"\.[A-Za-z0-9]{1,5}$", "", filename)
+    stem = re.sub(r"[_\-]+", " ", stem).strip()
+    if not stem:
+        return filename
+    return " ".join(w if w.isupper() else w.capitalize() for w in stem.split())
+
+
 # ── Context assembly ──────────────────────────────────────────────────────────
 
 def _build_context(chunks: list) -> tuple:
@@ -96,10 +110,12 @@ def _build_context(chunks: list) -> tuple:
         if chunk.chunk_id in seen_cids:
             continue
         seen_cids.add(chunk.chunk_id)
-        ref = f"[[{chunk.filename}:p{chunk.page_or_row}]]"
+        display_name = _humanize_filename(chunk.filename)
+        ref = f"({display_name}, p.{chunk.page_or_row})"
         parts.append(f"{ref}\n{chunk.text}")
         citations.append({
             "filename": chunk.filename,
+            "display_name": display_name,
             "page_or_row": chunk.page_or_row,
             "chunk_id": chunk.chunk_id,
             "snippet": chunk.text[:140],

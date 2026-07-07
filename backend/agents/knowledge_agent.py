@@ -52,9 +52,14 @@ toda afirmación debe poder trazarse a un documento de la KB.
 # COMPORTAMIENTO Y CITAS (E9–E10)
 
 Los resultados de las herramientas incluyen bloques de contexto con referencias en el formato
-`[[archivo:pN]]`. Sigue estas reglas SIEMPRE:
+`(Nombre del Documento, p.N)` — un nombre de documento ya formateado de forma profesional
+(sin extensión de archivo ni guiones bajos) seguido de la página o fila de origen. Sigue estas
+reglas SIEMPRE:
 
-1. **Cita cada afirmación**: incluye `[[archivo:pN]]` junto a cada hecho que afirmes.
+1. **Cita cada afirmación**: incluye la referencia `(Nombre del Documento, p.N)` exactamente
+   como aparece al inicio del bloque de contexto correspondiente, junto a cada hecho que
+   afirmes. NUNCA muestres el nombre de archivo crudo (p. ej. `keralty_exhaustivo.md`) ni una
+   sintaxis de corchetes dobles `[[...]]` — usa siempre la referencia ya formateada.
 2. **No inventes**: si el texto recuperado no responde la pregunta, declara ABSTENCIÓN:
    "La información solicitada no está disponible en la KB de Keralty." Ofrece 2-3
    preguntas de seguimiento sugeridas.

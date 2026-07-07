@@ -217,7 +217,9 @@ Full 6-stage hybrid RAG in `backend/services/rag/`:
 3. **Neighbor expansion**: pulls ±1 adjacent chunks for top-20 fused results
 4. **Gemini reranker** (`reranker.py`): scores each passage 0.0–1.0; dynamic gap cutoff (stops when `prev−curr > 0.2` and `len ≥ 4`); recall preservation adds back high-RRF items if result < min_k
 5. **Abstention gate** (`pipeline.py`): concept-recall check (keyword coverage of query terms in retrieved text); abstains with follow-up suggestions if coverage < 0.5
-6. **Context assembly**: `[[filename:pN]]` citation blocks; `RAGResult` dataclass with `should_abstain`, `context_text`, `citations`, `coverage`
+6. **Context assembly**: `(Document Name, p.N)` citation blocks; `RAGResult` dataclass with `should_abstain`, `context_text`, `citations`, `coverage`
+
+**Citations are humanized, never the raw filename.** `_build_context` (`pipeline.py`) runs each chunk's `filename` through `_humanize_filename` (strips the extension, turns `_`/`-` into spaces, title-cases) before building the inline reference — `keralty_exhaustivo.md` → `Keralty Exhaustivo`, rendered as `(Keralty Exhaustivo, p.6)`. Earlier this was a literal `[[keralty_exhaustivo.md:p6]]` tag that `KnowledgeAgent` copied verbatim into its answer and the frontend has no renderer for, so it showed up raw in the chat UI. Deliberately not a `[1]`/`[2]` numbering scheme — `_build_context` runs fresh per tool call, so sequential numbers would collide whenever `KnowledgeAgent` makes more than one KB tool call in the same turn; the named-reference form is collision-free by construction. Each entry in `RAGResult.citations` / the tool's `citations` list carries both the raw `filename` (kept for audit/debugging) and the new `display_name` (what should be shown/cited). `KnowledgeAgent`'s `INSTRUCTION` (`agents/knowledge_agent.py`) explicitly tells it to quote the formatted reference as-is and never emit the raw filename or `[[...]]` syntax.
 
 Chunking (`chunker.py`): structure-aware paragraph split → greedy merge (max 1000 tokens) → coalesce < 120 tokens → 15% overlap (applied **last**, after coalescing — not before) → neighbor links.
 
