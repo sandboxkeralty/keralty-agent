@@ -15,6 +15,12 @@ _DEFAULT_MIME_TYPES = [
     'application/vnd.google-apps.spreadsheet',
     'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     'application/vnd.ms-excel',
+    'application/pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/msword',
+    'text/plain',
+    'text/csv',
+    'text/markdown',
 ]
 _MIME_TYPE_ALIASES = {
     'document': ['application/vnd.google-apps.document'],
@@ -24,6 +30,19 @@ _MIME_TYPE_ALIASES = {
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'application/vnd.ms-excel',
     ],
+}
+
+# Non-native files whose raw bytes we can run through the same text extractor
+# used for local chat uploads (services/rag/ingestion.py's extract_text) —
+# mirrors the pattern services/sheets.py already uses for raw .xlsx files:
+# download via Drive's get_media rather than a format-specific export API.
+_EXTRACTABLE_MIME_TO_FILETYPE = {
+    'application/pdf': 'pdf',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': 'docx',
+    'application/msword': 'doc',
+    'text/plain': 'txt',
+    'text/csv': 'csv',
+    'text/markdown': 'md',
 }
 
 class DriveService:
@@ -72,6 +91,11 @@ class DriveService:
                 tabs = [s['properties']['title'] for s in meta.get('sheets', [])]
                 return (f"Spreadsheet with tabs: {', '.join(tabs)}. "
                         "Use sheets_list_tabs and read_spreadsheet_range to read specific tab contents.")
+            filetype = _EXTRACTABLE_MIME_TO_FILETYPE.get(mime_type)
+            if filetype:
+                data = service.files().get_media(fileId=file_id).execute()
+                from services.rag.ingestion import extract_text
+                return extract_text(data, filetype)
             return "Unsupported file type."
         except Exception as e:
             return f"Error reading document: {str(e)}"

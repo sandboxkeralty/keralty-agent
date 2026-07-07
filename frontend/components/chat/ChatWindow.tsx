@@ -104,8 +104,34 @@ export function ChatWindow() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachAreaRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+
+  // Close the attach menu / Drive picker on an outside click, and on Escape —
+  // previously the only way to dismiss the Drive picker once open was to
+  // select a file, with no close button and no click-outside handling.
+  useEffect(() => {
+    if (!showAttachMenu && !showPicker) return;
+    const handlePointerDown = (e: MouseEvent) => {
+      if (attachAreaRef.current && !attachAreaRef.current.contains(e.target as Node)) {
+        setShowAttachMenu(false);
+        setShowPicker(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setShowAttachMenu(false);
+        setShowPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showAttachMenu, showPicker]);
 
   const stopPlayback = () => {
     audioRef.current?.pause();
@@ -412,63 +438,65 @@ export function ChatWindow() {
         {uploadError && (
           <div className="mb-2 px-1 text-xs text-red-500">{uploadError}</div>
         )}
-        <div className="relative flex items-center gap-2">
-          <div className="relative flex-1 flex items-center">
-            <button
-              type="button"
-              onClick={() => setShowAttachMenu(p => !p)}
-              disabled={uploading}
-              className="absolute left-3 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] transition-colors z-10 disabled:opacity-50"
-              title="Adjuntar documento"
-            >
-              {uploading ? <Loader2 size={16} className="animate-spin" /> : <Paperclip size={16} />}
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,.docx,.doc,.txt,.csv,.md"
-              onChange={handleLocalUpload}
-              className="hidden"
-            />
-            <input
-              type="text"
-              className="w-full pl-10 pr-20 py-3 rounded-full border border-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 text-sm"
-              placeholder={t('placeholder')}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              disabled={loading}
-            />
-            <div className="absolute right-2 flex items-center gap-1">
-              <VoiceChat onTranscript={handleTranscript} />
+        <div ref={attachAreaRef}>
+          <div className="relative flex items-center gap-2">
+            <div className="relative flex-1 flex items-center">
               <button
-                type="submit"
-                disabled={!input.trim() || loading}
-                className="p-2 rounded-full bg-[var(--color-primary)] text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--color-primary-dark)] transition-colors"
+                type="button"
+                onClick={() => setShowAttachMenu(p => !p)}
+                disabled={uploading}
+                className="absolute left-3 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] transition-colors z-10 disabled:opacity-50"
+                title="Adjuntar documento"
               >
-                <Send size={16} />
+                {uploading ? <Loader2 size={16} className="animate-spin" /> : <Paperclip size={16} />}
               </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".pdf,.docx,.doc,.txt,.csv,.md"
+                onChange={handleLocalUpload}
+                className="hidden"
+              />
+              <input
+                type="text"
+                className="w-full pl-10 pr-20 py-3 rounded-full border border-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 text-sm"
+                placeholder={t('placeholder')}
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                disabled={loading}
+              />
+              <div className="absolute right-2 flex items-center gap-1">
+                <VoiceChat onTranscript={handleTranscript} />
+                <button
+                  type="submit"
+                  disabled={!input.trim() || loading}
+                  className="p-2 rounded-full bg-[var(--color-primary)] text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--color-primary-dark)] transition-colors"
+                >
+                  <Send size={16} />
+                </button>
+              </div>
             </div>
           </div>
+          {showAttachMenu && (
+            <div className="absolute bottom-20 left-4 z-50 shadow-xl rounded-[12px] overflow-hidden">
+              <AttachMenu
+                onUploadClick={() => {
+                  setShowAttachMenu(false);
+                  fileInputRef.current?.click();
+                }}
+                onDriveClick={() => {
+                  setShowAttachMenu(false);
+                  setShowPicker(true);
+                }}
+              />
+            </div>
+          )}
+          {showPicker && (
+            <div className="absolute bottom-20 left-4 z-50 shadow-xl rounded-[12px] overflow-hidden">
+              <DocumentPicker onSelect={handleSelectDoc} onClose={() => setShowPicker(false)} />
+            </div>
+          )}
         </div>
-        {showAttachMenu && (
-          <div className="absolute bottom-20 left-4 z-50 shadow-xl rounded-[12px] overflow-hidden">
-            <AttachMenu
-              onUploadClick={() => {
-                setShowAttachMenu(false);
-                fileInputRef.current?.click();
-              }}
-              onDriveClick={() => {
-                setShowAttachMenu(false);
-                setShowPicker(true);
-              }}
-            />
-          </div>
-        )}
-        {showPicker && (
-          <div className="absolute bottom-20 left-4 z-50 shadow-xl rounded-[12px] overflow-hidden">
-            <DocumentPicker onSelect={handleSelectDoc} />
-          </div>
-        )}
       </form>
     </div>
   );

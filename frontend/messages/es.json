@@ -36,7 +36,10 @@
     "selectFromDrive": "Seleccionar de Google Drive",
     "uploadFailed": "Error al subir el archivo",
     "uploading": "Subiendo...",
-    "formatsHelp": "Formatos admitidos: PDF, DOCX, TXT, CSV, MD — máx. 50 MB"
+    "formatsHelp": "Formatos admitidos: PDF, DOCX, TXT, CSV, MD — máx. 50 MB",
+    "close": "Cerrar",
+    "searchButton": "Buscar",
+    "noDocuments": "No se encontraron documentos"
   },
   "sidebar": {
     "today": "Hoy",
