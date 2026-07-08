@@ -115,10 +115,18 @@ sequenceDiagram
     FS-->>Chat: pending_approval event (polled)
     Chat-->>User: renders ApprovalCard
     User->>Chat: Approve
+    Chat->>FS: POST /api/tasks/{id}/approve → status=approved
     Chat->>Agent: "[APROBADO] task_id=..."
-    Agent->>Agent: execute the write (Docs/Sheets/Slides/Gmail)
+    Agent->>FS: destructive tool re-checks approval in code, consumes it
+    Agent->>Agent: execute the write (Docs/Sheets/Gmail)
     Agent-->>User: confirmation + link
 ```
+
+The approval is enforced **server-side**, not by the prompt: each destructive tool
+(`email_send`, `docs_update`, spreadsheet writes) verifies an approved, user-owned,
+not-yet-consumed task before it runs and consumes it so one approval authorizes exactly one
+action. The literal text `[APROBADO] task_id=...` alone — including from a prompt-injected
+attachment — cannot trigger a send or write.
 
 ---
 
@@ -239,11 +247,17 @@ branding/          Official Keralty brand assets (palette, logo, template)
 
 ## Security & compliance notes
 
-- Every Workspace write and every outbound email requires explicit human approval — there is no
-  code path that bypasses this.
+- **Authentication is required** for every request — a valid Google-OAuth-derived JWT. Missing,
+  expired, or forged tokens are rejected with a hard `401`; there is no test/guest fallback
+  identity, and the frontend shows an explicit sign-in screen when logged out.
+- Every Workspace write and every outbound email requires explicit human approval, **enforced in
+  code** (the destructive tool re-verifies an approved, user-owned, single-use task before it
+  executes) — not by prompt text, so approval cannot be spoofed by a crafted message.
 - All write actions are logged to an immutable Firestore audit trail.
 - This system provides **operational and administrative** intelligence only — it is not a
   clinical decision support tool and must never be used as one.
+- A July 2026 security/quality audit and its remediation are recorded in
+  [`docs/audit-2026-07-remediation.md`](docs/audit-2026-07-remediation.md).
 
 ---
 
