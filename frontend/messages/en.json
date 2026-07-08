@@ -1,4 +1,9 @@
 {
+  "auth": {
+    "required": "Sign in required",
+    "prompt": "Please sign in with your Keralty Google account to use the assistant.",
+    "login": "Sign in with Google"
+  },
   "nav": {
     "newChat": "New conversation",
     "history": "History",
@@ -18,7 +23,9 @@
     "readAloud": "Read aloud",
     "stopReading": "Stop reading",
     "approve": "Approve",
-    "reject": "Reject"
+    "reject": "Reject",
+    "attachDocument": "Attach document",
+    "errorGeneric": "Something went wrong processing your request. Please try again."
   },
   "approval": {
     "title": "Review required",

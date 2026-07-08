@@ -45,6 +45,27 @@ _EXTRACTABLE_MIME_TO_FILETYPE = {
     'text/markdown': 'md',
 }
 
+# Same cap as the local-upload endpoint (routers/documents.py). A Drive file
+# larger than this is refused before download so a multi-hundred-MB PDF/workbook
+# can't OOM the Cloud Run container (which runs at ~512MB–1GB).
+_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
+
+
+class DriveReadError(Exception):
+    """Raised when a Drive document cannot be read as text. Callers must surface
+    this as an error status — never let its message leak into prompt context as
+    if it were document content."""
+
+
+def _escape_drive_query(value: str) -> str:
+    r"""Escapes a user/LLM string for safe interpolation into a Drive `q` clause.
+    Per the Drive API, `\` and `'` inside a string literal must be backslash-escaped.
+    Without this, an apostrophe (e.g. "Board's report") 400s the request, and a
+    crafted value can break out of the literal to alter query semantics (injection).
+    """
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
 class DriveService:
     @staticmethod
     def list_documents(query: str = None, limit: int = 10, credentials=None,
@@ -57,7 +78,7 @@ class DriveService:
         mime_clause = " or ".join(f"mimeType='{t}'" for t in resolved)
         q = f"({mime_clause})"
         if query:
-            q += f" and name contains '{query}'"
+            q += f" and name contains '{_escape_drive_query(query)}'"
 
         results = service.files().list(
             q=q,
@@ -71,7 +92,10 @@ class DriveService:
     @staticmethod
     def read_document_text(file_id: str, credentials=None) -> str:
         service = get_drive_service(credentials)
-        file = service.files().get(fileId=file_id, fields="mimeType").execute()
+        try:
+            file = service.files().get(fileId=file_id, fields="mimeType, size").execute()
+        except Exception as e:
+            raise DriveReadError(f"Could not open document: {e}")
         mime_type = file.get("mimeType")
 
         try:
@@ -93,12 +117,21 @@ class DriveService:
                         "Use sheets_list_tabs and read_spreadsheet_range to read specific tab contents.")
             filetype = _EXTRACTABLE_MIME_TO_FILETYPE.get(mime_type)
             if filetype:
+                # Drive reports `size` only for binary (non-native) files — exactly
+                # this branch — so cap before pulling the bytes into memory.
+                size = int(file.get("size") or 0)
+                if size > _MAX_DOWNLOAD_BYTES:
+                    raise DriveReadError(
+                        f"File is too large to attach ({size // (1024 * 1024)} MB; limit 50 MB)."
+                    )
                 data = service.files().get_media(fileId=file_id).execute()
                 from services.rag.ingestion import extract_text
                 return extract_text(data, filetype)
-            return "Unsupported file type."
+            raise DriveReadError(f"Unsupported file type: {mime_type}")
+        except DriveReadError:
+            raise
         except Exception as e:
-            return f"Error reading document: {str(e)}"
+            raise DriveReadError(f"Error reading document: {e}")
 
     @staticmethod
     def export_pdf(file_id: str, credentials=None) -> bytes:

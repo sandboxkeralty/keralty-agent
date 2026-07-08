@@ -12,7 +12,6 @@ The KnowledgeAgent system prompt enforces the remaining generation guardrails
 (E10-E16): citation enforcement, grounding, completeness, entity consistency.
 """
 
-import os
 import re
 import json
 from dataclasses import dataclass, field
@@ -38,15 +37,9 @@ async def _rewrite_queries(query: str, n: int = 3) -> List[str]:
     """Generate n semantic variants of the query (E4/E6 fix)."""
     try:
         from google import genai
+        from services.genai_client import get_genai_client
 
-        if os.getenv("GOOGLE_GENAI_USE_VERTEXAI") == "1":
-            client = genai.Client(
-                vertexai=True,
-                project=settings.GOOGLE_CLOUD_PROJECT,
-                location=settings.GOOGLE_CLOUD_REGION,
-            )
-        else:
-            client = genai.Client(api_key=settings.GOOGLE_API_KEY)
+        client = get_genai_client()
 
         prompt = (
             f"Generate {n} semantically different reformulations of this search query "
@@ -58,9 +51,17 @@ async def _rewrite_queries(query: str, n: int = 3) -> List[str]:
         resp = await client.aio.models.generate_content(
             model=settings.GEMINI_FLASH_MODEL,
             contents=prompt,
-            config=genai.types.GenerateContentConfig(temperature=0.3, max_output_tokens=256),
+            # thinking_budget=0 is mandatory here — without it gemini-2.5-flash
+            # burns the 256-token budget on thinking and returns empty text, so
+            # json.loads raises "Expecting value" and query expansion silently
+            # produces zero variants (retrieval falls back to single-query).
+            config=genai.types.GenerateContentConfig(
+                temperature=0.3,
+                max_output_tokens=256,
+                thinking_config=genai.types.ThinkingConfig(thinking_budget=0),
+            ),
         )
-        raw = resp.text.strip()
+        raw = (resp.text or "").strip()
         start, end = raw.find("["), raw.rfind("]") + 1
         variants: List[str] = json.loads(raw[start:end]) if start >= 0 else []
         return [v for v in variants[:n] if isinstance(v, str)]

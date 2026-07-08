@@ -3,18 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Users, BarChart2, ShieldCheck, Settings, Loader2, RefreshCw, BookOpen, Upload, Trash2, FileText, CheckCircle } from "lucide-react";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-const getToken = () =>
-  typeof window !== "undefined" ? localStorage.getItem("keralty_token") || "test-token" : "test-token";
-
-async function apiFetch(path: string) {
-  const res = await fetch(`${API_URL}${path}`, {
-    headers: { Authorization: `Bearer ${getToken()}` },
-  });
-  if (!res.ok) throw new Error(`${res.status}`);
-  return res.json();
-}
+import { apiFetch as apiRequest, apiJson, UnauthorizedError } from "@/lib/api";
 
 interface UserRecord {
   user_id: string;
@@ -79,22 +68,23 @@ export default function AdminPage() {
     setError("");
     try {
       if (activeTab === "users") {
-        const data = await apiFetch("/admin/users");
+        const data = await apiJson<{ users?: UserRecord[] }>("/admin/users");
         setUsers(data.users || []);
       } else if (activeTab === "metrics") {
-        const data = await apiFetch("/admin/metrics");
+        const data = await apiJson<{ metrics: Metrics }>("/admin/metrics");
         setMetrics(data.metrics);
       } else if (activeTab === "audit") {
-        const data = await apiFetch("/admin/audit?limit=50");
+        const data = await apiJson<{ logs?: AuditEntry[] }>("/admin/audit?limit=50");
         setAudit(data.logs || []);
       } else if (activeTab === "kb") {
-        const data = await apiFetch("/knowledge/documents");
+        const data = await apiJson<{ documents?: KBDoc[] }>("/knowledge/documents");
         setKbDocs(data.documents || []);
       } else if (activeTab === "config") {
-        const data = await apiFetch("/admin/configs");
+        const data = await apiJson<{ configs?: Configs }>("/admin/configs");
         setConfigs(data.configs || {});
       }
     } catch (e: unknown) {
+      if (e instanceof UnauthorizedError) return;
       setError(e instanceof Error ? e.message : t("errorLoadingData"));
     } finally {
       setLoading(false);
@@ -122,16 +112,13 @@ export default function AdminPage() {
     try {
       const form = new FormData();
       form.append("file", file);
-      const res = await fetch(`${API_URL}/knowledge/documents`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${getToken()}` },
-        body: form,
-      });
-      const data = await res.json();
+      const res = await apiRequest(`/knowledge/documents`, { method: "POST", body: form });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || t("uploadFailed"));
       setUploadMsg(`✓ ${t("uploadSuccess", { filename: data.filename, count: data.chunk_count })}`);
       load("kb");
     } catch (err: unknown) {
+      if (err instanceof UnauthorizedError) return;
       setUploadMsg(`Error: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setUploading(false);
@@ -141,13 +128,11 @@ export default function AdminPage() {
 
   const handleDeleteDoc = async (docId: string) => {
     try {
-      await fetch(`${API_URL}/knowledge/documents/${docId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
+      const res = await apiRequest(`/knowledge/documents/${docId}`, { method: "DELETE" });
+      if (!res.ok) return;
       setKbDocs((prev) => prev.filter((d) => d.doc_id !== docId));
     } catch (err) {
-      console.error(err);
+      if (!(err instanceof UnauthorizedError)) console.error(err);
     }
   };
 

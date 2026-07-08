@@ -1,4 +1,9 @@
 {
+  "auth": {
+    "required": "Inicio de sesión requerido",
+    "prompt": "Inicia sesión con tu cuenta de Google de Keralty para usar el asistente.",
+    "login": "Iniciar sesión con Google"
+  },
   "nav": {
     "newChat": "Nueva conversación",
     "history": "Historial",
@@ -18,7 +23,9 @@
     "readAloud": "Leer en voz alta",
     "stopReading": "Detener lectura",
     "approve": "Aprobar",
-    "reject": "Rechazar"
+    "reject": "Rechazar",
+    "attachDocument": "Adjuntar documento",
+    "errorGeneric": "Ocurrió un problema al procesar tu solicitud. Inténtalo de nuevo."
   },
   "approval": {
     "title": "Revisión requerida",

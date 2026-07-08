@@ -18,7 +18,9 @@ def _credentials(tool_context):
             user_id = state.get("user_id")
             if user_id:
                 from services.firestore import FirestoreService
-                FirestoreService.store_user_credentials(user_id, {}, refreshed)
+                # update_credentials, not store_user_credentials: the latter would
+                # write email/name/picture as null and wipe the user's profile.
+                FirestoreService.update_credentials(user_id, refreshed)
         except Exception as e:
             print(f"[_auth] Token refresh failed: {e}")
     return creds

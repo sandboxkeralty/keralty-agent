@@ -72,13 +72,63 @@ class FirestoreService:
         return [{"task_id": doc.id, **doc.to_dict()} for doc in docs]
 
     @staticmethod
+    def find_approved_task(user_id: str, document_id: str) -> Optional[dict]:
+        """Returns an approved, user-owned, not-yet-consumed task for the given
+        resource (document_id / draft_id / spreadsheet_id), or None.
+
+        This is the server-side gate behind the HITL approval flow: destructive
+        tools call it before executing so approval can never be satisfied by the
+        agent merely reading the literal text "[APROBADO] task_id=..." (which a
+        prompt-injected attachment could emit). Ownership + approved-status are
+        enforced in code, not in the prompt.
+        """
+        docs = (
+            db.collection("tasks")
+            .where("user_id", "==", user_id)
+            .where("document_id", "==", document_id)
+            .where("status", "==", "approved")
+            .stream()
+        )
+        for doc in docs:
+            return {"task_id": doc.id, **doc.to_dict()}
+        return None
+
+    @staticmethod
+    def consume_task(task_id: str) -> None:
+        """Marks an approved task as consumed so a single approval can authorize
+        exactly one execution (prevents replay of the same [APROBADO] message)."""
+        from datetime import timezone
+        db.collection("tasks").document(task_id).update({
+            "status": "consumed",
+            "consumed_at": datetime.now(timezone.utc),
+        })
+
+    @staticmethod
     def store_user_credentials(user_id: str, user_info: dict, creds_dict: dict):
+        """Full profile write — only used at login (routers/auth.py), where
+        user_info is populated. Never call this from a token-refresh path with
+        an empty user_info, or it will null out email/name/picture."""
         from datetime import timezone
         db.collection("users").document(user_id).set({
             "user_id": user_id,
             "email": user_info.get("email"),
             "name": user_info.get("name"),
             "picture": user_info.get("picture"),
+            "google_credentials": creds_dict,
+            "updated_at": datetime.now(timezone.utc),
+        }, merge=True)
+
+    @staticmethod
+    def update_credentials(user_id: str, creds_dict: dict):
+        """Persists refreshed OAuth credentials WITHOUT touching profile fields.
+
+        The token-refresh hot path (tools/_auth.py, routers/email.py,
+        routers/documents.py) uses this instead of store_user_credentials — the
+        latter would write email/name/picture as null (merge=True does not skip
+        None), silently wiping the user's profile on every routine refresh.
+        """
+        from datetime import timezone
+        db.collection("users").document(user_id).set({
             "google_credentials": creds_dict,
             "updated_at": datetime.now(timezone.utc),
         }, merge=True)

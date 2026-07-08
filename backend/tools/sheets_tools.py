@@ -4,6 +4,7 @@ from google.adk.tools import ToolContext
 from services.sheets import SheetsService
 from tools._auth import _credentials
 from tools._audit import _audit
+from tools._approval import _require_approval
 
 
 async def create_spreadsheet(title: str, tool_context: ToolContext, data_json: Optional[str] = None) -> dict:
@@ -92,6 +93,9 @@ async def update_spreadsheet_values(spreadsheet_id: str, range_name: str, values
         range_name: A1 notation range including the tab name, e.g. 'Hoja 1!A1'.
         values_json: JSON string representing a list of lists (rows).
     """
+    gate = _require_approval(tool_context, spreadsheet_id)
+    if gate is not None:
+        return gate
     try:
         creds = _credentials(tool_context)
         values = json.loads(values_json)
@@ -112,6 +116,9 @@ async def append_spreadsheet_values(spreadsheet_id: str, range_name: str, values
         range_name: The tab name to append to, e.g. 'Hoja 1' (do not include a row/column range).
         values_json: JSON string representing a list of lists (rows) to append.
     """
+    gate = _require_approval(tool_context, spreadsheet_id)
+    if gate is not None:
+        return gate
     try:
         creds = _credentials(tool_context)
         values = json.loads(values_json)

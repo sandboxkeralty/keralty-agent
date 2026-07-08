@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query, Response, HTTPException, Request, UploadFile, File
 from auth.google_oauth import credentials_from_dict, credentials_to_dict
-from services.drive import DriveService
+from services.drive import DriveService, DriveReadError
 from services.firestore import FirestoreService
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -18,15 +18,16 @@ def _credentials_for_user(user_id: str):
         try:
             from google.auth.transport.requests import Request as GRequest
             creds.refresh(GRequest())
-            FirestoreService.store_user_credentials(user_id, {}, credentials_to_dict(creds))
+            FirestoreService.update_credentials(user_id, credentials_to_dict(creds))
         except Exception as e:
             print(f"[documents] token refresh failed: {e}")
     return creds
 
 
 def _creds_from_request(request: Request):
+    # Auth middleware guarantees request.state.user on /documents paths (or 401s).
     user = getattr(request.state, "user", {})
-    user_id = user.get("email") or user.get("uid") or "sandbox-user"
+    user_id = user.get("email") or user["uid"]
     return _credentials_for_user(user_id)
 
 
@@ -40,7 +41,12 @@ def list_documents(request: Request, q: str = Query(None), limit: int = 10):
 def read_document_text(file_id: str, request: Request):
     """Returns the text content of a Drive document for context injection."""
     creds = _creds_from_request(request)
-    text = DriveService.read_document_text(file_id, credentials=creds)
+    try:
+        text = DriveService.read_document_text(file_id, credentials=creds)
+    except DriveReadError as e:
+        # Surface a real error instead of letting the error message be attached
+        # to the chat as if it were the document's content.
+        raise HTTPException(status_code=422, detail=str(e))
     if not text:
         raise HTTPException(status_code=404, detail="Document not found or unreadable")
     return {"file_id": file_id, "text": text}

@@ -12,7 +12,14 @@ async def approval_create(task_description: str, document_id: str, changes_summa
     """
     task_id = str(uuid.uuid4())
     state = getattr(tool_context, "state", {}) if tool_context else {}
-    user_id = state.get("user_id") or "sandbox-user"
+    # user_id is the authenticated identity (email) injected into session state by
+    # chat.py. It MUST match what the destructive tool later checks via
+    # _require_approval, and what tasks.py checks on approve — otherwise the gate
+    # can't find the task. No sandbox fallback: an unauthenticated turn shouldn't
+    # be able to create an approvable task.
+    user_id = state.get("user_id")
+    if not user_id:
+        return {"status": "error", "error": "No authenticated user in session; cannot create approval."}
     
     FirestoreService.create_task(task_id, {
         "type": "generic_approval",

@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
 import { Mail, Loader2, RefreshCw, Send, Clock } from 'lucide-react';
+import { apiFetch, UnauthorizedError } from '@/lib/api';
 
 type Priority = 'CRITICO' | 'ALTO' | 'MEDIO' | 'BAJO';
 
@@ -62,9 +63,6 @@ export default function EmailPage() {
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [followupResult, setFollowupResult] = useState<Record<string, FollowupResult>>({});
   const [warnings, setWarnings] = useState<string[]>([]);
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-  const getToken = () => typeof window !== 'undefined' ? localStorage.getItem('keralty_token') || 'test-token' : 'test-token';
-
   const handleGenerateFollowup = async (trackingId: string) => {
     setGeneratingId(trackingId);
     setFollowupResult(prev => {
@@ -73,14 +71,12 @@ export default function EmailPage() {
       return next;
     });
     try {
-      const res = await fetch(`${apiUrl}/api/email/tracking/${trackingId}/generate-followup`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
-      const data = await res.json();
+      const res = await apiFetch(`/api/email/tracking/${trackingId}/generate-followup`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || t('followupError'));
       setFollowupResult(prev => ({ ...prev, [trackingId]: { subject: data.subject, body: data.body } }));
     } catch (e) {
+      if (e instanceof UnauthorizedError) return;
       setFollowupResult(prev => ({ ...prev, [trackingId]: { error: e instanceof Error ? e.message : t('followupError') } }));
     } finally {
       setGeneratingId(null);
@@ -94,9 +90,7 @@ export default function EmailPage() {
       // right now, not a fixed HQ timezone) — so "today" in Bandeja/Críticos/
       // Pendientes reflects their actual calendar day.
       const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const res = await fetch(`${apiUrl}/api/email/summary?tz=${encodeURIComponent(tz)}`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
+      const res = await apiFetch(`/api/email/summary?tz=${encodeURIComponent(tz)}`);
       if (res.ok) {
         const data = await res.json();
         setThreads(data.inbox_today || []);
@@ -105,7 +99,7 @@ export default function EmailPage() {
         setWarnings(data.warnings || []);
       }
     } catch (e) {
-      console.error(e);
+      if (!(e instanceof UnauthorizedError)) console.error(e);
     } finally {
       setLoading(false);
     }

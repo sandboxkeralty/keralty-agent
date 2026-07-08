@@ -25,10 +25,14 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 # Health check
 curl http://localhost:8000/health
 
-# Test chat endpoint (test-token falls back to sandbox-user identity)
+# Test chat endpoint — requires a REAL JWT. There is no test-token bypass anymore:
+# any invalid/expired token gets a hard 401 (a forged token used to authenticate
+# as the sandbox user, which holds live Drive + Gmail credentials — that hole is
+# closed). Log in via the OAuth flow (/auth/login) to obtain a token, or mint one
+# locally with SECRET_KEY. A missing/invalid token → 401.
 curl -X POST http://localhost:8000/api/chat \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer test-token" \
+  -H "Authorization: Bearer <real-jwt>" \
   -d '{"message": "hello", "session_id": "dev-1", "user_id": "dev-user"}'
 ```
 
@@ -129,7 +133,7 @@ POST /api/chat → middleware verifies JWT → request.state.user = {uid, email}
 
 Key files:
 - `backend/auth/google_oauth.py` — OAuth flow helpers + `_flow_cache` (PKCE state preservation)
-- `backend/auth/auth_middleware.py` — JWT verification; falls back to `sandbox-user` for `test-token`. Only authenticates paths matching `_AUTHENTICATED_PREFIXES = ("/api/", "/admin", "/knowledge", "/history", "/documents")` — **the `/voice` WebSocket route is deliberately excluded** (see `routers/voice.py`; WebSocket auth would need a different mechanism than the header-based check here).
+- `backend/auth/auth_middleware.py` — JWT verification. **Any missing/invalid/expired token on an authenticated path returns a hard 401** — there is no `sandbox-user`/`test-token` fallback (that fallback was a security hole: a forged `Bearer` header authenticated as the sandbox user, which has real Drive + `gmail.modify` OAuth creds). Only authenticates paths matching `_AUTHENTICATED_PREFIXES = ("/api/", "/admin", "/knowledge", "/history", "/documents")` — **the `/voice` WebSocket route is deliberately excluded** (see `routers/voice.py`; WebSocket auth would need a different mechanism than the header-based check here).
 - `backend/routers/auth.py` — `/auth/login` and `/auth/callback`
 - `backend/routers/chat.py` — loads Firestore creds, injects into ADK session state; also persists messages
 - `backend/tools/_auth.py` — `_credentials(tool_context)` helper: extracts creds, refreshes if expired, re-persists to Firestore
@@ -137,7 +141,7 @@ Key files:
 
 ### Google Workspace API access
 
-All four service factories (`services/drive.py`, `docs.py`, `sheets.py`, `slides.py`) accept an optional `credentials` parameter. When a user is logged in, their OAuth tokens flow from Firestore → session state → `_credentials(tool_context)` → service call. When not logged in (e.g. `test-token`), falls back to `google.auth.default()` (service account ADC — only works for files owned by the service account).
+All four service factories (`services/drive.py`, `docs.py`, `sheets.py`, `slides.py`) accept an optional `credentials` parameter. Every authenticated request now carries a real user (the middleware 401s otherwise), so their OAuth tokens flow from Firestore → session state → `_credentials(tool_context)` → service call. The `google.auth.default()` (service-account ADC) branch remains only as a defensive fallback when a logged-in user simply has no stored `google_credentials` yet — it is no longer reachable via a `test-token` shortcut.
 
 Required Cloud Run env vars: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `SECRET_KEY`.
 
@@ -167,10 +171,12 @@ EditingAgent, VisualAgent, and EmailAgent all use a conversational HITL pattern:
 1. Agent proposes changes → calls `approval_create` → Firestore task with `status=pending`
 2. `routers/chat.py` SSE stream includes a `pending_approval` event with `task_id`
 3. `ChatWindow.tsx` polls `GET /api/tasks` every 5 seconds while idle; renders `<ApprovalCard>` for each pending task
-4. User clicks Approve → frontend calls `POST /api/tasks/{id}/approve` → auto-sends `"[APROBADO] task_id={id}"` chat message
-5. Agent instruction watches for `[APROBADO] task_id=...` and executes the buffered action
+4. User clicks Approve → frontend calls `POST /api/tasks/{id}/approve` (ownership-checked; rejects if already rejected) → flips the task to `status=approved` → auto-sends `"[APROBADO] task_id={id}"` chat message
+5. Agent sees `[APROBADO] task_id=...` and calls the destructive tool, which **re-verifies approval in code**
 
-Guardrail in each agent instruction: **NUNCA ejecutes la acción destructiva sin [APROBADO]**.
+**The approval gate is enforced server-side, not by prompt text.** `tools/_approval.py::_require_approval` is called by every destructive tool (`email_send`, `docs_update`, `update_spreadsheet_values`, `append_spreadsheet_values`) before it acts: it looks up an `approved`, **user-owned**, not-yet-`consumed` Firestore task for the exact resource (`document_id`/`draft_id`/`spreadsheet_id` that `approval_create` stored), then marks it `consumed` so one approval authorizes exactly one execution. This closes a real bypass — previously the guarantee was prompt-only, so the literal text `[APROBADO] task_id=...` (including inside a prompt-injected **attached document**) could trigger a buffered send/write. `WritingAgent` no longer holds `docs_update` at all (edits route to the gated `EditingAgent`); only `docs_create`/`create_spreadsheet` (new-file creation) remain ungated. `slides_create` is still prompt-gated only — its approval task has no `document_id` at creation time, so the code gate can't key on it (tracked in `docs/audit-2026-07-remediation.md`).
+
+Guardrail in each agent instruction: **NUNCA ejecutes la acción destructiva sin [APROBADO]** — now backed by the code gate above rather than trusting the model.
 
 `ApprovalCard.tsx`'s diff display and the pending-tasks container both have capped, independently-scrollable heights (`max-h-48`/`max-h-[50vh]` with `overflow-y-auto`) — a long `changes_summary` or several stacked pending tasks used to push the Approve/Reject buttons below the visible viewport in the app's fixed-height, non-page-scrolling layout, with no way to reach them short of browser zoom-out.
 

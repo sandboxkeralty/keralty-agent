@@ -6,7 +6,6 @@ Recall preservation: if result set falls below min_k, add back high-RRF items.
 """
 
 import json
-import os
 from typing import List
 
 from services.rag.retriever import RetrievedChunk
@@ -40,22 +39,25 @@ async def rerank(
     try:
         from google import genai
         from config import settings
+        from services.genai_client import get_genai_client
 
-        if os.getenv("GOOGLE_GENAI_USE_VERTEXAI") == "1":
-            client = genai.Client(
-                vertexai=True,
-                project=settings.GOOGLE_CLOUD_PROJECT,
-                location=settings.GOOGLE_CLOUD_REGION,
-            )
-        else:
-            client = genai.Client(api_key=settings.GOOGLE_API_KEY)
+        client = get_genai_client()
 
         response = await client.aio.models.generate_content(
             model=settings.GEMINI_FLASH_MODEL,
             contents=prompt,
-            config=genai.types.GenerateContentConfig(temperature=0.0, max_output_tokens=512),
+            # thinking_budget=0 is mandatory: gemini-2.5-flash spends "thinking"
+            # tokens out of max_output_tokens first, so without this the 512-token
+            # budget is consumed before any JSON is emitted → empty response.text →
+            # json.loads raises "Expecting value" → reranker silently degrades to raw
+            # RRF order (the documented latent bug, confirmed firing in prod).
+            config=genai.types.GenerateContentConfig(
+                temperature=0.0,
+                max_output_tokens=512,
+                thinking_config=genai.types.ThinkingConfig(thinking_budget=0),
+            ),
         )
-        raw = response.text.strip()
+        raw = (response.text or "").strip()
         start, end = raw.find("["), raw.rfind("]") + 1
         scores: List[float] = json.loads(raw[start:end]) if start >= 0 else []
 

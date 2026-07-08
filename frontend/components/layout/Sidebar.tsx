@@ -8,6 +8,7 @@ import { useRouter } from "next/navigation";
 import { MessageSquare, Settings, Mail, Plus, Trash2, Loader2 } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useChatSession, ChatMessage } from "@/hooks/useChatSession";
+import { apiFetch, UnauthorizedError } from "@/lib/api";
 
 interface SessionSummary {
   session_id: string;
@@ -41,24 +42,19 @@ export function Sidebar() {
   const [loading, setLoading] = useState(true);
   const [switching, setSwitching] = useState<string | null>(null);
 
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
-  const getToken = () => (typeof window !== "undefined" ? localStorage.getItem("keralty_token") || "test-token" : "test-token");
-
   const fetchHistory = useCallback(async () => {
     try {
-      const res = await fetch(`${apiUrl}/history/`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
+      const res = await apiFetch(`/history/`);
       if (res.ok) {
         const data = await res.json();
         setSessions(data.sessions || []);
       }
     } catch (e) {
-      console.error(e);
+      if (!(e instanceof UnauthorizedError)) console.error(e);
     } finally {
       setLoading(false);
     }
-  }, [apiUrl]);
+  }, []);
 
   useEffect(() => {
     fetchHistory();
@@ -76,9 +72,7 @@ export function Sidebar() {
     }
     setSwitching(session.session_id);
     try {
-      const res = await fetch(`${apiUrl}/history/${session.session_id}`, {
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
+      const res = await apiFetch(`/history/${session.session_id}`);
       if (res.ok) {
         const data = await res.json();
         const mapped: ChatMessage[] = (data.messages || []).map(
@@ -92,7 +86,7 @@ export function Sidebar() {
         router.push("/");
       }
     } catch (e) {
-      console.error(e);
+      if (!(e instanceof UnauthorizedError)) console.error(e);
     } finally {
       setSwitching(null);
     }
@@ -101,16 +95,14 @@ export function Sidebar() {
   const handleDelete = async (e: React.MouseEvent, session: SessionSummary) => {
     e.stopPropagation();
     try {
-      await fetch(`${apiUrl}/history/${session.session_id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${getToken()}` },
-      });
+      const res = await apiFetch(`/history/${session.session_id}`, { method: "DELETE" });
+      if (!res.ok) return; // leave the row in place if the server rejected the delete
       setSessions((prev) => prev.filter((s) => s.session_id !== session.session_id));
       if (session.session_id === sessionId) {
         startNewConversation();
       }
     } catch (e) {
-      console.error(e);
+      if (!(e instanceof UnauthorizedError)) console.error(e);
     }
   };
 

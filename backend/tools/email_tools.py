@@ -7,6 +7,7 @@ from google.adk.tools import ToolContext
 from config import settings
 from services.email.gmail_provider import GmailProvider
 from tools._auth import _credentials
+from tools._approval import _require_approval
 
 
 async def email_list(account_id: str = "primary", folder: str = "inbox", max_results: int = 50, tool_context: ToolContext = None) -> dict:
@@ -62,6 +63,9 @@ async def email_draft(to: str, subject: str, body: str, tool_context: ToolContex
 
 async def email_send(draft_id: str, tool_context: ToolContext) -> dict:
     """Sends a previously created draft. Requires explicit user approval."""
+    gate = _require_approval(tool_context, draft_id)
+    if gate is not None:
+        return gate
     try:
         message_id = GmailProvider.send_draft(draft_id, credentials=_credentials(tool_context))
 

@@ -63,11 +63,14 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                     session.state["google_credentials"] = creds_dict
                     session.state["user_id"] = user_id
 
-                # Inject attached document context into session state
+                # Keep only the current turn's attachment in session state, capped
+                # at 8000 chars. This dict is serialized to the adk_sessions Firestore
+                # doc on every event; an unbounded append would walk toward the 1 MB
+                # document limit and eventually break state persistence silently. The
+                # attachment is also injected into the message parts below (the path
+                # the model actually reads), so session state doesn't need history.
                 if body.attached_context and session:
-                    existing = session.state.get("attached_documents", [])
-                    existing.append(body.attached_context[:8000])  # cap per-doc size
-                    session.state["attached_documents"] = existing
+                    session.state["attached_documents"] = [body.attached_context[:8000]]
             except Exception as e:
                 print(f"Session error: {e}")
 
@@ -132,7 +135,11 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                     pass
 
         except Exception as e:
-            print(f"Error in streaming: {e}")
-            yield f"data: {json.dumps({'type': 'content', 'text': f'An error occurred: {str(e)}'})}\n\n"
+            # Log the real detail server-side, but never stream raw exception text
+            # (Firestore/Google API errors, internal IDs, stack details) to the
+            # user — that violates the "no internal details" guardrail. The frontend
+            # renders a localized message for the `error` event type.
+            print(f"Error in streaming: {type(e).__name__}: {e}", flush=True)
+            yield f"data: {json.dumps({'type': 'error'})}\n\n"
 
     return StreamingResponse(sse_generator(), media_type="text/event-stream")

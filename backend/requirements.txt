@@ -1,29 +1,33 @@
-google-adk
-fastapi
-uvicorn[standard]
-google-cloud-firestore
-google-cloud-storage
-google-cloud-logging
-google-cloud-monitoring
-google-cloud-trace
-google-cloud-error-reporting
-google-auth
-google-auth-oauthlib
-google-auth-httplib2
-google-api-python-client
-google-cloud-aiplatform
-opentelemetry-sdk
-opentelemetry-exporter-gcp-trace
-opentelemetry-instrumentation-fastapi
-pydantic
-pydantic-settings
-python-dotenv
-python-jose[cryptography]
-email-validator
-python-multipart
+# Pinned to the versions in the working production image (python:3.11-slim).
+# The code relies on google-adk internals (routing via _find_agent_to_run and
+# the auto-injected transfer_to_agent tool), so a floating ADK version could
+# silently change agent-routing behavior — keep these pinned and bump deliberately.
+google-adk==2.3.0
+fastapi==0.139.0
+uvicorn[standard]==0.50.2
+google-cloud-firestore==2.28.0
+google-cloud-storage==3.12.0
+google-cloud-logging==3.16.0
+google-cloud-monitoring==2.31.0
+google-cloud-trace==1.20.0
+google-cloud-error-reporting==1.16.0
+google-auth==2.55.1
+google-auth-oauthlib==1.4.0
+google-auth-httplib2==0.4.0
+google-api-python-client==2.198.0
+google-cloud-aiplatform==1.159.0
+opentelemetry-sdk==1.42.1
+opentelemetry-exporter-gcp-trace==1.12.0
+opentelemetry-instrumentation-fastapi==0.63b1
+pydantic==2.13.4
+pydantic-settings==2.14.2
+python-dotenv==1.2.2
+python-jose[cryptography]==3.5.0
+email-validator==2.3.0
+python-multipart==0.0.32
 # RAG pipeline
-pypdf
-python-docx
-rank-bm25
-numpy
-openpyxl
+pypdf==6.14.2
+python-docx==1.2.0
+rank-bm25==0.2.2
+numpy==2.4.6
+openpyxl==3.1.5

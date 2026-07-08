@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Button } from "../shared/Button";
 import { FileText, Loader2, X } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { apiFetch, UnauthorizedError } from "@/lib/api";
 
 export interface DriveFile {
   id: string;
@@ -21,24 +22,15 @@ export function DocumentPicker({ onSelect, onClose }: { onSelect: (file: DriveFi
   const fetchFiles = async (q: string = "") => {
     setLoading(true);
     try {
-      // Note: NEXT_PUBLIC_API_URL should be used instead of hardcoding localhost
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const token = localStorage.getItem('keralty_token') || 'test-token';
-      // Trailing slash is required here: FastAPI 307-redirects "/documents" to
-      // "/documents/" and issues the redirect with an http:// Location header
-      // (Cloud Run's load balancer terminates TLS, so Uvicorn sees plain HTTP
-      // and doesn't know to redirect with https://) — the browser silently
-      // blocks that as mixed content on an https page, which looked exactly
-      // like "no documents" here (curl doesn't enforce mixed-content rules,
-      // so this was invisible to curl-based testing). Calling the canonical
-      // "/documents/" path directly skips the redirect entirely.
-      const res = await fetch(`${apiUrl}/documents/?q=${encodeURIComponent(q)}`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
+      // Trailing slash is required: FastAPI 307-redirects "/documents" to
+      // "/documents/" with an http:// Location (Cloud Run terminates TLS, so
+      // Uvicorn sees plain HTTP), which the browser blocks as mixed content on
+      // an https page — invisible to curl. Call the canonical path directly.
+      const res = await apiFetch(`/documents/?q=${encodeURIComponent(q)}`);
       const data = await res.json();
       setFiles(data.files || []);
     } catch (err) {
-      console.error(err);
+      if (!(err instanceof UnauthorizedError)) console.error(err);
     } finally {
       setLoading(false);
     }

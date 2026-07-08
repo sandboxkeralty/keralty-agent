@@ -12,6 +12,7 @@ import { AttachMenu } from '../documents/AttachMenu';
 import { VoiceChat } from './VoiceChat';
 import { useTranslations, useLocale } from 'next-intl';
 import { useChatSession, ChatMessage } from '@/hooks/useChatSession';
+import { API_URL, apiFetch, getToken, clearToken, UnauthorizedError, UNAUTHORIZED_EVENT } from '@/lib/api';
 
 // Strips Markdown syntax so it isn't read aloud literally (e.g. "asterisk asterisk").
 function stripMarkdownForSpeech(text: string): string {
@@ -150,14 +151,9 @@ export function ChatWindow() {
     }
     stopPlayback();
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const token = localStorage.getItem('keralty_token') || 'test-token';
-      const res = await fetch(`${apiUrl}/api/tts`, {
+      const res = await apiFetch(`/api/tts`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: stripMarkdownForSpeech(text), locale }),
       });
       if (!res.ok) throw new Error('TTS request failed');
@@ -182,18 +178,17 @@ export function ChatWindow() {
 
   useEffect(() => {
     const poll = async () => {
+      // Don't poll when logged out or when the tab is hidden — avoids hammering
+      // the (billed, cold-starting) Cloud Run backend 720×/hour per idle tab.
+      if (!getToken() || document.hidden) return;
       try {
-        const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-        const token = localStorage.getItem('keralty_token') || 'test-token';
-        const res = await fetch(`${apiUrl}/api/tasks`, {
-          headers: { 'Authorization': `Bearer ${token}` },
-        });
+        const res = await apiFetch(`/api/tasks`);
         if (res.ok) {
           const tasks: PendingTask[] = await res.json();
           setPendingTasks(tasks);
         }
       } catch {
-        // ignore polling errors
+        // 401 already routed to the login gate via apiFetch; ignore transient errors.
       }
     };
     poll();
@@ -202,12 +197,13 @@ export function ChatWindow() {
   }, []);
 
   const handleApprove = async (taskId: string, documentId: string) => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-    const token = localStorage.getItem('keralty_token') || 'test-token';
-    await fetch(`${apiUrl}/api/tasks/${taskId}/approve`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-    });
+    try {
+      await apiFetch(`/api/tasks/${taskId}/approve`, { method: 'POST' });
+    } catch (e) {
+      if (e instanceof UnauthorizedError) return;
+      console.error(e);
+      return;
+    }
     setPendingTasks(prev => prev.filter(t => t.task_id !== taskId));
     // Auto-send approval message so the agent can continue
     setInput(`[APROBADO] task_id=${taskId} — procede con la operación para el documento ${documentId}`);
@@ -218,18 +214,15 @@ export function ChatWindow() {
 
   const handleSelectDoc = async (file: DriveFile) => {
     setShowPicker(false);
+    setUploadError('');
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const token = localStorage.getItem('keralty_token') || 'test-token';
-      const res = await fetch(`${apiUrl}/documents/${file.id}/text`, {
-        headers: { 'Authorization': `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setAttachedDoc({ file, text: data.text });
-      }
+      const res = await apiFetch(`/documents/${file.id}/text`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || td('uploadFailed'));
+      setAttachedDoc({ file, text: data.text });
     } catch (e) {
-      console.error(e);
+      if (e instanceof UnauthorizedError) return;
+      setUploadError(e instanceof Error ? e.message : String(e));
     }
   };
 
@@ -240,22 +233,17 @@ export function ChatWindow() {
     setUploading(true);
     setUploadError('');
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const token = localStorage.getItem('keralty_token') || 'test-token';
       const form = new FormData();
       form.append('file', file);
-      const res = await fetch(`${apiUrl}/documents/upload`, {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` },
-        body: form,
-      });
-      const data = await res.json();
+      const res = await apiFetch(`/documents/upload`, { method: 'POST', body: form });
+      const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || td('uploadFailed'));
       setAttachedDoc({
-        file: { id: `local:${Date.now()}`, name: data.filename, mimeType: file.type || 'application/octet-stream' },
+        file: { id: `local:${crypto.randomUUID()}`, name: data.filename, mimeType: file.type || 'application/octet-stream' },
         text: data.text,
       });
     } catch (err: unknown) {
+      if (err instanceof UnauthorizedError) return;
       setUploadError(err instanceof Error ? err.message : String(err));
     } finally {
       setUploading(false);
@@ -270,12 +258,13 @@ export function ChatWindow() {
   };
 
   const handleReject = async (taskId: string) => {
-    const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-    const token = localStorage.getItem('keralty_token') || 'test-token';
-    await fetch(`${apiUrl}/api/tasks/${taskId}/reject`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` },
-    });
+    try {
+      await apiFetch(`/api/tasks/${taskId}/reject`, { method: 'POST' });
+    } catch (e) {
+      if (e instanceof UnauthorizedError) return;
+      console.error(e);
+      return;
+    }
     setPendingTasks(prev => prev.filter(t => t.task_id !== taskId));
   };
 
@@ -284,7 +273,7 @@ export function ChatWindow() {
     if (!input.trim() || loading) return;
 
     const userMessage: ChatMessage = {
-      id: Date.now().toString(),
+      id: crypto.randomUUID(),
       role: 'user',
       content: input,
     };
@@ -293,13 +282,20 @@ export function ChatWindow() {
     setInput('');
     setLoading(true);
 
-    const assistantId = (Date.now() + 1).toString();
+    const assistantId = crypto.randomUUID();
     setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '', isStreaming: true }]);
 
+    const failWith = (msg: string) => setMessages(prev => prev.map(m =>
+      m.id === assistantId ? { ...m, content: msg, isStreaming: false } : m
+    ));
+
+    let sawError = false;
     try {
-      const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-      const token = localStorage.getItem('keralty_token') || 'test-token';
-      const response = await fetch(`${apiUrl}/api/chat`, {
+      const token = getToken();
+      if (!token) throw new UnauthorizedError();
+      // Not via apiFetch: streaming needs the raw Response object here, but the
+      // 401 handling is replicated so an expired token drops to the login gate.
+      const response = await fetch(`${API_URL}/api/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -312,7 +308,11 @@ export function ChatWindow() {
         }),
       });
 
-      if (!response.body) throw new Error('No readable stream');
+      if (response.status === 401) throw new UnauthorizedError();
+      if (!response.ok || !response.body) {
+        failWith(t('errorGeneric'));
+        return;
+      }
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -344,6 +344,10 @@ export function ChatWindow() {
                       }
                       return m;
                    }));
+                } else if (data.type === 'error') {
+                  // Backend signals a failure mid-stream without leaking internals.
+                  sawError = true;
+                  failWith(t('errorGeneric'));
                 }
               } catch (e) {
                 console.error("Error parsing JSON chunk", e);
@@ -352,17 +356,21 @@ export function ChatWindow() {
           }
         }
       }
-      
+
       setMessages(prev => prev.map(m =>
-        m.id === assistantId ? { ...m, isStreaming: false } : m
+        m.id === assistantId && !sawError ? { ...m, isStreaming: false } : m
       ));
       setAttachedDoc(null);
       bumpHistoryRefresh();
     } catch (err) {
+      if (err instanceof UnauthorizedError) {
+        // Session expired / not logged in: drop to the login gate.
+        clearToken();
+        window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
+        return;
+      }
       console.error(err);
-      setMessages(prev => prev.map(m =>
-        m.id === assistantId ? { ...m, content: 'Error communicating with the assistant.', isStreaming: false } : m
-      ));
+      failWith(t('errorGeneric'));
     } finally {
       setLoading(false);
     }
@@ -446,7 +454,7 @@ export function ChatWindow() {
                 onClick={() => setShowAttachMenu(p => !p)}
                 disabled={uploading}
                 className="absolute left-3 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] transition-colors z-10 disabled:opacity-50"
-                title="Adjuntar documento"
+                title={t('attachDocument')}
               >
                 {uploading ? <Loader2 size={16} className="animate-spin" /> : <Paperclip size={16} />}
               </button>

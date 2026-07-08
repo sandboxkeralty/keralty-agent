@@ -2,6 +2,7 @@ from google.adk.tools import ToolContext
 from services.docs import DocsService
 from tools._auth import _credentials
 from tools._audit import _audit
+from tools._approval import _require_approval
 from typing import Optional
 
 async def docs_get(document_id: str, tool_context: ToolContext) -> dict:
@@ -31,6 +32,9 @@ async def docs_update(document_id: str, content: str, tool_context: ToolContext)
         document_id: The ID of the document to update.
         content: The text content to append to the document.
     """
+    gate = _require_approval(tool_context, document_id)
+    if gate is not None:
+        return gate
     try:
         creds = _credentials(tool_context)
         DocsService.append_text(document_id, content, credentials=creds)

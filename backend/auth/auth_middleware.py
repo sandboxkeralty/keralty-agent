@@ -4,6 +4,7 @@ from typing import Callable, Awaitable
 
 _AUTHENTICATED_PREFIXES = ("/api/", "/admin", "/knowledge", "/history", "/documents")
 
+
 async def auth_middleware(request: Request, call_next: Callable[[Request], Awaitable[JSONResponse]]):
     if request.method == "OPTIONS":
         return await call_next(request)
@@ -15,13 +16,18 @@ async def auth_middleware(request: Request, call_next: Callable[[Request], Await
 
         token = auth_header.split(" ")[1]
         try:
-            from jose import jwt as jose_jwt, JWTError
+            from jose import jwt as jose_jwt
             from config import settings
             payload = jose_jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+            # Both claims are minted together in routers/auth.py; a token missing
+            # either is malformed and must not be trusted.
             request.state.user = {"uid": payload["sub"], "email": payload["email"]}
         except Exception:
-            # Fall back to sandbox identity for test-token or invalid JWTs
-            request.state.user = {"uid": "sandbox-user", "email": "sandboxkeralty@gmail.com"}
+            # Any decode/verify/expiry/claim failure is a hard reject. We deliberately
+            # do NOT fall back to a sandbox identity — doing so would authenticate
+            # forged/expired tokens as a real user holding live Drive + Gmail OAuth
+            # credentials. There is no test-token bypass in production.
+            return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
 
     response = await call_next(request)
     return response

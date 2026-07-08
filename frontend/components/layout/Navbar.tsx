@@ -4,22 +4,16 @@ import * as React from "react";
 import { useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { LocaleSwitcher } from "./LocaleSwitcher";
+import { getToken, clearToken, loginUrl, UNAUTHORIZED_EVENT } from "@/lib/api";
 
 export function Navbar() {
   const t = useTranslations("nav");
   const [userEmail, setUserEmail] = useState<string | null>(null);
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
   useEffect(() => {
-    // Capture token from OAuth redirect (?token=...)
-    const params = new URLSearchParams(window.location.search);
-    const token = params.get("token");
-    if (token) {
-      localStorage.setItem("keralty_token", token);
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-
-    const stored = localStorage.getItem("keralty_token");
+    // AuthGate captures the ?token= redirect before the shell renders; here we
+    // just decode the stored token to display the user's email.
+    const stored = getToken();
     if (stored) {
       try {
         const payload = JSON.parse(atob(stored.split(".")[1]));
@@ -31,8 +25,9 @@ export function Navbar() {
   }, []);
 
   function logout() {
-    localStorage.removeItem("keralty_token");
+    clearToken();
     setUserEmail(null);
+    window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
   }
 
   return (
@@ -54,7 +49,7 @@ export function Navbar() {
           </div>
         ) : (
           <a
-            href={`${apiUrl}/auth/login`}
+            href={loginUrl()}
             className="text-sm font-medium text-[var(--color-primary)] hover:underline"
           >
             {t("login")}

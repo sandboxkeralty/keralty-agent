@@ -29,9 +29,17 @@ def _is_raw_excel_file(file_id: str, credentials=None) -> bool:
     meta = drive.files().get(fileId=file_id, fields="mimeType").execute()
     return meta.get("mimeType") in _XLSX_MIME_TYPES
 
+_MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
+
+
 def _load_xlsx_workbook(file_id: str, credentials=None):
     from openpyxl import load_workbook
     drive = get_drive_service(credentials)
+    # Cap size before downloading so a huge workbook can't OOM the container.
+    meta = drive.files().get(fileId=file_id, fields="size").execute()
+    size = int(meta.get("size") or 0)
+    if size > _MAX_DOWNLOAD_BYTES:
+        raise ValueError(f"Spreadsheet is too large to read ({size // (1024 * 1024)} MB; limit 50 MB).")
     content = drive.files().get_media(fileId=file_id).execute()
     return load_workbook(io.BytesIO(content), data_only=True, read_only=True)
 

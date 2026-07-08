@@ -1,0 +1,13 @@
+# Keep secrets, wrong-arch binaries, and dev cruft out of the image layers.
+venv/
+.venv/
+.env
+.env.*
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.DS_Store
+test_signature.py
+scratch_runner_check.py

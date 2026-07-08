@@ -37,7 +37,7 @@ def _credentials_for_user(user_id: str):
         try:
             from google.auth.transport.requests import Request as GRequest
             creds.refresh(GRequest())
-            FirestoreService.store_user_credentials(user_id, {}, credentials_to_dict(creds))
+            FirestoreService.update_credentials(user_id, credentials_to_dict(creds))
         except Exception as e:
             print(f"[email summary] token refresh failed: {e}")
     return creds
