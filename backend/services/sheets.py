@@ -118,6 +118,63 @@ class SheetsService:
         return result.get('updates', {})
 
     @staticmethod
+    def _require_native_sheet(spreadsheet_id: str, credentials=None) -> None:
+        # Tab management goes through spreadsheets().batchUpdate, which only
+        # understands native Google Sheets IDs — a raw uploaded .xlsx/.xls
+        # can be *read* (via openpyxl) but not structurally modified here.
+        if _is_raw_excel_file(spreadsheet_id, credentials):
+            raise ValueError(
+                "This file is a raw Excel upload (.xlsx/.xls); tabs can only be "
+                "added, renamed or deleted on native Google Sheets. Convert the "
+                "file to Google Sheets first."
+            )
+
+    @staticmethod
+    def _resolve_sheet_id(spreadsheet_id: str, tab_title: str, credentials=None) -> int:
+        meta = SheetsService.get_spreadsheet(spreadsheet_id, credentials)
+        for s in meta.get("sheets", []):
+            if s["properties"]["title"] == tab_title:
+                return s["properties"]["sheetId"]
+        titles = [s["properties"]["title"] for s in meta.get("sheets", [])]
+        raise ValueError(f"No tab named '{tab_title}' in this spreadsheet. Existing tabs: {titles}")
+
+    @staticmethod
+    def add_sheet(spreadsheet_id: str, title: str, credentials=None) -> Dict[str, Any]:
+        SheetsService._require_native_sheet(spreadsheet_id, credentials)
+        service = get_sheets_service(credentials)
+        result = service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [{"addSheet": {"properties": {"title": title}}}]},
+        ).execute()
+        props = result["replies"][0]["addSheet"]["properties"]
+        return {"sheet_id": props["sheetId"], "title": props["title"]}
+
+    @staticmethod
+    def rename_sheet(spreadsheet_id: str, tab_title: str, new_title: str, credentials=None) -> None:
+        SheetsService._require_native_sheet(spreadsheet_id, credentials)
+        sheet_id = SheetsService._resolve_sheet_id(spreadsheet_id, tab_title, credentials)
+        service = get_sheets_service(credentials)
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [{"updateSheetProperties": {
+                "properties": {"sheetId": sheet_id, "title": new_title},
+                "fields": "title",
+            }}]},
+        ).execute()
+
+    @staticmethod
+    def delete_sheet(spreadsheet_id: str, tab_title: str, credentials=None) -> None:
+        SheetsService._require_native_sheet(spreadsheet_id, credentials)
+        sheet_id = SheetsService._resolve_sheet_id(spreadsheet_id, tab_title, credentials)
+        service = get_sheets_service(credentials)
+        # The API itself rejects deleting the last remaining tab — that error
+        # is surfaced to the caller rather than pre-checked here.
+        service.spreadsheets().batchUpdate(
+            spreadsheetId=spreadsheet_id,
+            body={"requests": [{"deleteSheet": {"sheetId": sheet_id}}]},
+        ).execute()
+
+    @staticmethod
     def share_spreadsheet(spreadsheet_id: str, email: str, credentials=None) -> None:
         service = get_drive_service(credentials)
         service.permissions().create(

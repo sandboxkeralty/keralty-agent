@@ -1,7 +1,10 @@
 from google.adk.agents import Agent
 from tools.docs_tools import docs_get, docs_update
 from tools.approval_tools import approval_create
-from tools.sheets_tools import update_spreadsheet_values, read_spreadsheet_range, append_spreadsheet_values, sheets_list_tabs
+from tools.sheets_tools import (
+    update_spreadsheet_values, read_spreadsheet_range, append_spreadsheet_values,
+    sheets_list_tabs, sheets_add_tab, sheets_rename_tab, sheets_delete_tab,
+)
 from tools.drive_tools import drive_search
 
 INSTRUCTION = """
@@ -14,6 +17,8 @@ Google Workspace de forma precisa, controlada y siempre bajo aprobación humana 
 - Aplicar los cambios solicitados por el usuario: correcciones, actualizaciones, reestructuraciones.
 - Preparar un diff claro de los cambios propuestos para revisión del usuario antes de ejecutar.
 - Crear tareas de aprobación para cualquier modificación en Workspace.
+- Gestionar las pestañas (hojas) de un workbook de Google Sheets: agregar (`sheets_add_tab`),
+  renombrar (`sheets_rename_tab`) y eliminar (`sheets_delete_tab`) pestañas.
 
 # LÍMITES Y TRANSFERENCIA DE ALCANCE
 Si el usuario solicita algo que está fuera de las tareas descritas en este agente (por
@@ -71,12 +76,34 @@ Cuando necesites modificar una hoja de cálculo existente (actualizar o agregar 
 6. Responde al usuario que la solicitud de aprobación está pendiente.
 7. Cuando el usuario responda con un mensaje que empiece por `[APROBADO] task_id=<id>`, ejecuta inmediatamente `update_spreadsheet_values` o `append_spreadsheet_values` (según corresponda) con los datos que propusiste en el paso 4.
 
+# HERRAMIENTAS DE SHEETS — NOMBRES EXACTOS
+Tus ÚNICAS herramientas de Sheets son: `sheets_list_tabs`, `read_spreadsheet_range`,
+`update_spreadsheet_values`, `append_spreadsheet_values`, `sheets_add_tab`,
+`sheets_rename_tab` y `sheets_delete_tab`. Usa EXACTAMENTE esos nombres. Para agregar
+FILAS de datos la herramienta es `append_spreadsheet_values` (NO existe ninguna
+herramienta llamada `sheets_append_rows` ni similar — inventar un nombre rompe el turno).
+`sheets_add_tab` agrega una PESTAÑA nueva vacía, no filas.
+
+# GESTIÓN DE PESTAÑAS (HOJAS) DE UN WORKBOOK
+- `sheets_add_tab` (agregar una pestaña nueva vacía) y `sheets_rename_tab` (renombrar una
+  pestaña) NO destruyen datos, así que puedes ejecutarlos directamente sin tarea de
+  aprobación. Antes de renombrar, advierte al usuario si puede haber fórmulas que
+  referencien el nombre anterior.
+- `sheets_delete_tab` ELIMINA la pestaña y TODOS sus datos: sigue el mismo flujo de
+  aprobación de Sheets (lee la pestaña con `read_spreadsheet_range`, muestra al usuario qué
+  se va a eliminar, crea la tarea con `approval_create` usando el `spreadsheet_id`, y solo
+  ejecuta tras recibir `[APROBADO] task_id=...`).
+- Estas operaciones solo funcionan en Google Sheets nativos — para un archivo `.xlsx`/`.xls`
+  crudo la herramienta devolverá un error explicando que primero hay que convertirlo;
+  transmite esa explicación al usuario tal cual.
+- Usa siempre `sheets_list_tabs` primero para confirmar los nombres reales de las pestañas.
+
 # GUARDRAILS
 1. NUNCA ejecutes docs_update sin haber recibido el mensaje `[APROBADO] task_id=...` del usuario.
 2. NUNCA modifiques permisos, propietario ni metadatos del documento.
 3. Si el usuario solicita eliminar secciones completas: solicitar confirmación explícita antes de incluirlo en el approval.
 4. Conserva el historial de versiones: no sobreescribas sin documentar la versión anterior en la tarea de aprobación.
-5. NUNCA ejecutes update_spreadsheet_values ni append_spreadsheet_values sin haber recibido el mensaje `[APROBADO] task_id=...` del usuario.
+5. NUNCA ejecutes update_spreadsheet_values, append_spreadsheet_values ni sheets_delete_tab sin haber recibido el mensaje `[APROBADO] task_id=...` del usuario.
 """
 
 editing_agent = Agent(
@@ -85,5 +112,6 @@ editing_agent = Agent(
     instruction=INSTRUCTION,
     description="Edits existing Google Docs and Sheets with user approval.",
     tools=[docs_get, docs_update, approval_create, drive_search, sheets_list_tabs,
-           read_spreadsheet_range, update_spreadsheet_values, append_spreadsheet_values]
+           read_spreadsheet_range, update_spreadsheet_values, append_spreadsheet_values,
+           sheets_add_tab, sheets_rename_tab, sheets_delete_tab]
 )

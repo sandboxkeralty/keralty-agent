@@ -197,9 +197,12 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                             text = ""
                             if isinstance(event.content, str):
                                 text = event.content
-                            elif hasattr(event.content, "text"):
+                            elif getattr(event.content, "text", None) is not None:
                                 text = event.content.text
-                            elif hasattr(event.content, "parts"):
+                            # parts is a Pydantic field that can be None (seen in
+                            # production: transfer/tool-only events) — hasattr is
+                            # always True, so guard the value, not the attribute.
+                            elif getattr(event.content, "parts", None):
                                 for p in event.content.parts:
                                     if p.text is not None:
                                         text += p.text

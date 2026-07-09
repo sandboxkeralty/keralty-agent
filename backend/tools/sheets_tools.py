@@ -128,3 +128,68 @@ async def append_spreadsheet_values(spreadsheet_id: str, range_name: str, values
                 "message": f"Successfully appended {len(values)} row(s) to '{range_name}'."}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+async def sheets_add_tab(spreadsheet_id: str, tab_title: str, tool_context: ToolContext) -> dict:
+    """Adds a new empty tab (sheet) to an existing Google Spreadsheet workbook.
+
+    Additive and non-destructive (no existing data is touched), so it does not
+    require an approval task — consistent with create_spreadsheet being ungated.
+    Only works on native Google Sheets, not raw uploaded .xlsx/.xls files.
+
+    Args:
+        spreadsheet_id: The ID of the spreadsheet workbook.
+        tab_title: Title for the new tab. Must not already exist in the workbook.
+    """
+    try:
+        result = SheetsService.add_sheet(spreadsheet_id, tab_title, credentials=_credentials(tool_context))
+        _audit(tool_context, "sheets_add_tab", "spreadsheet", spreadsheet_id)
+        return {"status": "success", "sheet_id": result["sheet_id"], "title": result["title"],
+                "message": f"Tab '{result['title']}' added to the spreadsheet."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+async def sheets_rename_tab(spreadsheet_id: str, tab_title: str, new_title: str,
+                            tool_context: ToolContext) -> dict:
+    """Renames an existing tab (sheet) in a Google Spreadsheet workbook.
+
+    Non-destructive (no cell data is changed), so it does not require an
+    approval task — but warn the user first if formulas may reference the tab
+    by its old name. Only works on native Google Sheets.
+
+    Args:
+        spreadsheet_id: The ID of the spreadsheet workbook.
+        tab_title: Current title of the tab to rename (call sheets_list_tabs first).
+        new_title: The new title for the tab.
+    """
+    try:
+        SheetsService.rename_sheet(spreadsheet_id, tab_title, new_title, credentials=_credentials(tool_context))
+        _audit(tool_context, "sheets_rename_tab", "spreadsheet", spreadsheet_id)
+        return {"status": "success",
+                "message": f"Tab '{tab_title}' renamed to '{new_title}'."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+
+
+async def sheets_delete_tab(spreadsheet_id: str, tab_title: str, tool_context: ToolContext) -> dict:
+    """Deletes a tab (sheet) and ALL its data from a Google Spreadsheet workbook.
+
+    DESTRUCTIVE: requires an approved, unconsumed HITL task for this
+    spreadsheet (create one with approval_create and wait for [APROBADO]),
+    same as update/append. Only works on native Google Sheets. The API rejects
+    deleting the last remaining tab of a workbook.
+
+    Args:
+        spreadsheet_id: The ID of the spreadsheet workbook.
+        tab_title: Title of the tab to delete (call sheets_list_tabs first).
+    """
+    gate = _require_approval(tool_context, spreadsheet_id)
+    if gate is not None:
+        return gate
+    try:
+        SheetsService.delete_sheet(spreadsheet_id, tab_title, credentials=_credentials(tool_context))
+        _audit(tool_context, "sheets_delete_tab", "spreadsheet", spreadsheet_id)
+        return {"status": "success", "message": f"Tab '{tab_title}' was deleted from the spreadsheet."}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
