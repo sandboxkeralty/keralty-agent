@@ -2,6 +2,7 @@ from google.adk.agents import Agent
 from google.adk.tools import google_search
 from google.adk.tools.agent_tool import AgentTool
 from tools.drive_tools import drive_read, drive_search
+from config import settings
 
 INSTRUCTION = """
 # IDIOMA — REGLA PRIORITARIA
@@ -87,7 +88,7 @@ el equipo del usuario y NO existe en Drive: trabaja únicamente con el texto del
 
 _web_search_agent = Agent(
     name="WebSearchAgent",
-    model="gemini-2.5-flash",
+    model=settings.GEMINI_FLASH_MODEL,
     instruction="Busca en la web pública información relevante a la consulta recibida. "
                 "Devuelve los hallazgos con URL, título, dominio y un fragmento relevante de cada fuente. "
                 "Responde SIEMPRE en el mismo idioma de la consulta recibida (si la consulta "
@@ -98,7 +99,7 @@ _web_search_agent = Agent(
 
 research_agent = Agent(
     name="ResearchAgent",
-    model="gemini-2.5-flash",
+    model=settings.GEMINI_FLASH_MODEL,
     instruction=INSTRUCTION,
     description="Researches information using web search and internal Drive documents.",
     tools=[drive_search, drive_read, AgentTool(agent=_web_search_agent)]

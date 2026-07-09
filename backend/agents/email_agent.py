@@ -4,6 +4,7 @@ from tools.email_tools import (
     email_draft, email_send, email_track, email_get_tracking, email_generate_followup
 )
 from tools.approval_tools import approval_create
+from config import settings
 
 INSTRUCTION = """
 # IDIOMA — REGLA PRIORITARIA
@@ -132,7 +133,7 @@ Cuando el usuario pida enviar un correo, el flujo OBLIGATORIO es:
 
 email_agent = Agent(
     name="EmailAgent",
-    model="gemini-2.5-flash",
+    model=settings.GEMINI_FLASH_MODEL,
     instruction=INSTRUCTION,
     description="Intelligent Email management agent",
     tools=[

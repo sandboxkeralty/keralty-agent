@@ -2,6 +2,7 @@ from google.adk.agents import Agent
 from tools.slides_tools import slides_create, slides_add_slide, slides_add_image, slides_get
 from tools.image_tools import image_generate
 from tools.approval_tools import approval_create
+from config import settings
 
 INSTRUCTION = """
 # IDIOMA — REGLA PRIORITARIA
@@ -157,7 +158,7 @@ Para añadir una imagen a una slide ya creada:
 
 visual_agent = Agent(
     name="VisualAgent",
-    model="gemini-2.5-flash",
+    model=settings.GEMINI_FLASH_MODEL,
     instruction=INSTRUCTION,
     description="Creates executive Google Slides presentations with real content and images.",
     tools=[slides_create, slides_add_slide, slides_add_image, slides_get, image_generate, approval_create],

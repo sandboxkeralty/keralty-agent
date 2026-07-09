@@ -2,6 +2,7 @@ from google.adk.agents import Agent
 from tools.drive_tools import drive_read, drive_search
 from tools.rag_tools import context_inject, rag_retrieve
 from tools.sheets_tools import read_spreadsheet_range, sheets_list_tabs
+from config import settings
 
 INSTRUCTION = """
 # IDIOMA — REGLA PRIORITARIA
@@ -96,7 +97,7 @@ Cuando necesites leer datos de una hoja de cálculo:
 
 analysis_agent = Agent(
     name="AnalysisAgent",
-    model="gemini-2.5-pro",
+    model=settings.GEMINI_PRO_MODEL,
     instruction=INSTRUCTION,
     description="Analyzes internal documents to answer questions, generate summaries, and extract structured data.",
     tools=[drive_read, drive_search, context_inject, rag_retrieve, sheets_list_tabs, read_spreadsheet_range]

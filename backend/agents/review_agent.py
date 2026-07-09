@@ -1,6 +1,7 @@
 from google.adk.agents import Agent
 from tools.drive_tools import drive_read
 from tools.docs_tools import docs_get
+from config import settings
 
 INSTRUCTION = """
 # IDIOMA — REGLA PRIORITARIA
@@ -75,7 +76,7 @@ el equipo del usuario y NO existe en Drive: trabaja únicamente con el texto del
 
 review_agent = Agent(
     name="ReviewAgent",
-    model="gemini-2.5-flash",
+    model=settings.GEMINI_FLASH_MODEL,
     instruction=INSTRUCTION,
     description="Reviews drafted documents for quality validation.",
     tools=[drive_read, docs_get]

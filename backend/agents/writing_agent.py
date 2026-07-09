@@ -3,6 +3,7 @@ from tools.drive_tools import drive_read
 from tools.rag_tools import context_inject
 from tools.sheets_tools import create_spreadsheet
 from tools.docs_tools import docs_create
+from config import settings
 
 INSTRUCTION = """
 # IDIOMA — REGLA PRIORITARIA
@@ -108,7 +109,7 @@ IMPORTANTE: Nunca crees una hoja de cálculo vacía cuando el usuario ya proporc
 
 writing_agent = Agent(
     name="WritingAgent",
-    model="gemini-2.5-pro",
+    model=settings.GEMINI_PRO_MODEL,
     instruction=INSTRUCTION,
     description="Drafts markdown documents for executive summary and proposals.",
     tools=[drive_read, context_inject, create_spreadsheet, docs_create]

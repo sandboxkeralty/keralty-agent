@@ -7,6 +7,7 @@ from agents.review_agent import review_agent
 from agents.visual_agent import visual_agent
 from agents.email_agent import email_agent
 from agents.knowledge_agent import knowledge_agent
+from config import settings
 
 INSTRUCTION = """
 # IDIOMA — REGLA PRIORITARIA
@@ -118,7 +119,7 @@ solo se puede trabajar con su texto.
 
 orchestrator_agent = Agent(
     name="OrchestratorAgent",
-    model="gemini-2.5-flash",
+    model=settings.GEMINI_FLASH_MODEL,
     instruction=INSTRUCTION,
     description="Agent root that delegates tasks to specialized sub-agents based on the user's intent.",
     sub_agents=[

@@ -8,8 +8,14 @@ class Settings(BaseSettings):
 
     USE_VERTEX_AI: bool = False
     GOOGLE_API_KEY: Optional[str] = None
-    GEMINI_FLASH_MODEL: str = "gemini-2.5-flash"
-    GEMINI_PRO_MODEL: str = "gemini-2.5-pro"
+    # Rolling AI Studio aliases (July 2026: resolve to gemini-3.5-flash /
+    # gemini-3.1-pro-preview). gemini-2.5-flash/pro were HARD-DEPRECATED on the
+    # AI Studio key path ("no longer available", 404) — pinned versions die;
+    # the -latest aliases survive deprecations. NOTE: these aliases do NOT
+    # exist on Vertex AI — a rollback to GOOGLE_GENAI_USE_VERTEXAI=1 must also
+    # override both env vars with explicit Vertex model IDs.
+    GEMINI_FLASH_MODEL: str = "gemini-flash-latest"
+    GEMINI_PRO_MODEL: str = "gemini-pro-latest"
     GEMINI_LIVE_MODEL: str = "gemini-live-2.5-flash-native-audio"
     # Probed July 2026: only imagen-3.0-generate-001 is served on keraltysandbox
     # (imagen-4.0-* and 3.0-002 return 404). image_tools has a fallback chain, so

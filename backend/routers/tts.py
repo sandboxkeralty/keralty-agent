@@ -42,12 +42,24 @@ async def generate_tts(req: TTSRequest) -> Response:
     )
 
     try:
-        response = await client.aio.models.generate_content(
-            model=settings.GEMINI_TTS_MODEL,
-            contents=req.text,
-            config=config,
-        )
-        parts = response.candidates[0].content.parts
+        # The preview TTS model intermittently returns an empty candidate
+        # (content=None, finish_reason=OTHER) — reproduced with identical
+        # inputs succeeding on retry, so retry before failing the request.
+        parts = None
+        for attempt in range(3):
+            response = await client.aio.models.generate_content(
+                model=settings.GEMINI_TTS_MODEL,
+                contents=req.text,
+                config=config,
+            )
+            cand = response.candidates[0] if response.candidates else None
+            if cand and cand.content and cand.content.parts:
+                parts = cand.content.parts
+                break
+            print(f"[tts] empty candidate (attempt {attempt + 1}, "
+                  f"finish={getattr(cand, 'finish_reason', None)}), retrying", flush=True)
+        if not parts:
+            raise RuntimeError("model returned no audio after 3 attempts")
         audio_part = next(p for p in parts if p.inline_data)
         pcm_bytes = audio_part.inline_data.data
         mime = audio_part.inline_data.mime_type or ""

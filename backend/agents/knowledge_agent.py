@@ -1,5 +1,6 @@
 from google.adk.agents import Agent
 from tools.kb_tools import kb_search, kb_get_person, kb_get_department, kb_get_org_chart, kb_get_policy
+from config import settings
 
 INSTRUCTION = """
 # IDIOMA — REGLA PRIORITARIA
@@ -128,7 +129,7 @@ subido desde el equipo del usuario y NO existe en Drive.
 
 knowledge_agent = Agent(
     name="KnowledgeAgent",
-    model="gemini-2.5-flash",
+    model=settings.GEMINI_FLASH_MODEL,
     instruction=INSTRUCTION,
     description="Corporate Knowledge Base agent for Keralty organization.",
     tools=[kb_search, kb_get_person, kb_get_department, kb_get_org_chart, kb_get_policy]

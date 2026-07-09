@@ -6,6 +6,7 @@ from tools.sheets_tools import (
     sheets_list_tabs, sheets_add_tab, sheets_rename_tab, sheets_delete_tab,
 )
 from tools.drive_tools import drive_search
+from config import settings
 
 INSTRUCTION = """
 # IDIOMA — REGLA PRIORITARIA
@@ -137,7 +138,7 @@ herramienta llamada `sheets_append_rows` ni similar — inventar un nombre rompe
 
 editing_agent = Agent(
     name="EditingAgent",
-    model="gemini-2.5-flash",
+    model=settings.GEMINI_FLASH_MODEL,
     instruction=INSTRUCTION,
     description="Edits existing Google Docs and Sheets with user approval.",
     tools=[docs_get, docs_update, approval_create, drive_search, sheets_list_tabs,
