@@ -10,6 +10,13 @@ app = FastAPI(title="Keralty Agent API")
 
 setup_tracing(app)
 
+app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
+
+# Registered last so CORSMiddleware is the OUTERMOST middleware (Starlette wraps
+# in reverse registration order). It must wrap the auth middleware: a 401 short-
+# circuited by auth would otherwise leave the server without CORS headers, and
+# browsers surface that as an opaque "Failed to fetch" instead of a 401 the
+# frontend can catch to redirect to login.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_ORIGINS.split(","),
@@ -17,8 +24,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-app.add_middleware(BaseHTTPMiddleware, dispatch=auth_middleware)
 
 app.include_router(auth.router)
 app.include_router(documents.router)

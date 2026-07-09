@@ -98,11 +98,28 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
             message_parts.append(types.Part.from_text(text=body.message))
 
             full_response = ""
+            last_status = None
             async for event in runner.run_async(
                 new_message=types.Content(role="user", parts=message_parts),
                 session_id=body.session_id,
                 user_id=user_id,
             ):
+                # Surface which agent/tool is working so the frontend can show a
+                # meaningful "Consultando la base de conocimiento…" style label
+                # instead of a bare blinking cursor. Deduped: only emitted when
+                # the (agent, tool) pair changes.
+                author = getattr(event, "author", None)
+                tool = None
+                try:
+                    calls = event.get_function_calls()
+                    if calls:
+                        tool = calls[0].name
+                except Exception:
+                    pass
+                if author != "user" and (author or tool) and (author, tool) != last_status:
+                    last_status = (author, tool)
+                    yield f"data: {json.dumps({'type': 'status', 'agent': author, 'tool': tool})}\n\n"
+
                 if getattr(event, "content", None) is not None:
                     text = ""
                     if isinstance(event.content, str):

@@ -102,6 +102,7 @@ export function ChatWindow() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
+  const [agentStatus, setAgentStatus] = useState<{ agent: string | null; tool: string | null } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -281,6 +282,7 @@ export function ChatWindow() {
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setLoading(true);
+    setAgentStatus(null);
 
     const assistantId = crypto.randomUUID();
     setMessages(prev => [...prev, { id: assistantId, role: 'assistant', content: '', isStreaming: true }]);
@@ -336,6 +338,8 @@ export function ChatWindow() {
                   setMessages(prev => prev.map(m =>
                     m.id === assistantId ? { ...m, content: m.content + data.text } : m
                   ));
+                } else if (data.type === 'status') {
+                  setAgentStatus({ agent: data.agent ?? null, tool: data.tool ?? null });
                 } else if (data.type === 'source') {
                    setMessages(prev => prev.map(m => {
                       if (m.id === assistantId) {
@@ -373,7 +377,39 @@ export function ChatWindow() {
       failWith(t('errorGeneric'));
     } finally {
       setLoading(false);
+      setAgentStatus(null);
     }
+  };
+
+  // Maps the streamed (agent, tool) status to a human-friendly localized label.
+  // Tool wins over agent (it's more specific); unknown pairs fall back to the
+  // generic "thinking" label.
+  const statusLabel = (s: { agent: string | null; tool: string | null } | null): string => {
+    const tool = s?.tool ?? '';
+    if (tool && tool !== 'transfer_to_agent') {
+      if (tool.startsWith('kb_') || tool === 'rag_retrieve') return t('statusKb');
+      if (tool.startsWith('drive_')) return t('statusDrive');
+      if (tool.startsWith('docs_')) return t('statusDocs');
+      if (tool.startsWith('sheets_') || tool.includes('spreadsheet')) return t('statusSheets');
+      if (tool.startsWith('slides_')) return t('statusSlides');
+      if (tool.startsWith('email_')) return t('statusEmail');
+      if (tool === 'image_generate') return t('statusImage');
+      if (tool === 'approval_create') return t('statusApproval');
+      if (tool === 'WebSearchAgent' || tool === 'google_search') return t('statusWeb');
+    }
+    switch (s?.agent) {
+      case 'OrchestratorAgent': return t('statusRouting');
+      case 'AnalysisAgent': return t('statusAnalysis');
+      case 'ResearchAgent': return t('statusResearch');
+      case 'WritingAgent': return t('statusWriting');
+      case 'EditingAgent': return t('statusEditing');
+      case 'ReviewAgent': return t('statusReview');
+      case 'VisualAgent': return t('statusVisual');
+      case 'EmailAgent': return t('statusEmail');
+      case 'KnowledgeAgent': return t('statusKb');
+      case 'WebSearchAgent': return t('statusWeb');
+    }
+    return t('agentThinking');
   };
 
   return (
@@ -389,7 +425,17 @@ export function ChatWindow() {
                 <div className="[&_a]:text-blue-600 [&_a]:underline [&_a:hover]:text-blue-800 [&_h1]:text-base [&_h1]:font-bold [&_h1]:mb-1 [&_h2]:text-sm [&_h2]:font-semibold [&_h2]:mb-1 [&_h3]:text-sm [&_h3]:font-semibold [&_p]:mb-1 [&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:mb-0.5 [&_table]:border-collapse [&_table]:w-full [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:border-gray-200 [&_th]:px-2 [&_th]:py-1 [&_th]:bg-gray-50 [&_code]:bg-gray-100 [&_code]:px-1 [&_code]:rounded [&_blockquote]:border-l-2 [&_blockquote]:border-gray-300 [&_blockquote]:pl-2 [&_blockquote]:italic">
                   <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ img: MarkdownImage, a: MarkdownLink }}>{m.content}</ReactMarkdown>
                 </div>
-                {m.isStreaming && <span className="inline-block w-1 h-4 ml-1 bg-current animate-pulse align-middle" />}
+                {m.isStreaming && !m.content && (
+                  <div className="flex items-center gap-2 text-[var(--color-text-secondary)]">
+                    <span className="inline-flex gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" />
+                      <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-1.5 h-1.5 rounded-full bg-current animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </span>
+                    <span className="text-xs">{statusLabel(agentStatus)}</span>
+                  </div>
+                )}
+                {m.isStreaming && m.content && <span className="inline-block w-1 h-4 ml-1 bg-current animate-pulse align-middle" />}
               </div>
               {m.sources && m.sources.length > 0 && (
                 <div className="flex gap-2 flex-wrap mt-1">
