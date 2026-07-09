@@ -1,11 +1,12 @@
 import asyncio
 import json
+import random
 import uuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request as FastAPIRequest
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
 from google.genai import types
 from agents.runner import runner
 from services.firestore import FirestoreService
@@ -13,7 +14,14 @@ from models.schemas import SessionInDB, MessageInDB
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
-_MAX_QUOTA_ATTEMPTS = 3
+_MAX_QUOTA_ATTEMPTS = 4
+# Base backoff per retry (seconds); jitter is added on top. Observed 429
+# bursts on Vertex dynamic shared quota sometimes outlive the original
+# 2s+4s budget, so the ladder now stretches to ~17s worst-case total.
+_QUOTA_BACKOFF = [2, 5, 10]
+
+_MAX_ATTACHED_FILES = 5
+_MAX_ATTACHMENT_CHARS = 8000
 
 
 def _is_quota_error(e: Exception) -> bool:
@@ -23,17 +31,38 @@ def _is_quota_error(e: Exception) -> bool:
     s = f"{type(e).__name__} {e}"
     return "RESOURCE_EXHAUSTED" in s or "ResourceExhausted" in s or "429" in s
 
+class AttachedFile(BaseModel):
+    text: str
+    # Drive metadata, when the file came from Drive: lets agents operate on the
+    # real file (Docs/Sheets/Slides tools) instead of only its extracted text.
+    # Local uploads send a synthetic "local:<uuid>" id.
+    file_id: Optional[str] = None
+    file_name: Optional[str] = None
+    mime_type: Optional[str] = None
+
+
 class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = "default-session"
     user_id: Optional[str] = "default-user"
-    attached_context: Optional[str] = None  # text content of an attached document
-    # Drive metadata of the attachment, when it came from Drive: lets agents
-    # operate on the real file (Docs/Sheets/Slides tools) instead of only its
-    # extracted text. Local uploads send a synthetic "local:<ts>" id.
+    attached_files: Optional[List[AttachedFile]] = None
+    # Legacy single-attachment fields — kept so an older cached frontend build
+    # keeps working; normalized into attached_files in the endpoint.
+    attached_context: Optional[str] = None
     attached_file_id: Optional[str] = None
     attached_file_name: Optional[str] = None
     attached_mime_type: Optional[str] = None
+
+    def normalized_attachments(self) -> List[AttachedFile]:
+        files = list(self.attached_files or [])
+        if self.attached_context:
+            files.append(AttachedFile(
+                text=self.attached_context,
+                file_id=self.attached_file_id,
+                file_name=self.attached_file_name,
+                mime_type=self.attached_mime_type,
+            ))
+        return files[:_MAX_ATTACHED_FILES]
 
 @router.post("")
 async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
@@ -86,8 +115,11 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                 # document limit and eventually break state persistence silently. The
                 # attachment is also injected into the message parts below (the path
                 # the model actually reads), so session state doesn't need history.
-                if body.attached_context and session:
-                    session.state["attached_documents"] = [body.attached_context[:8000]]
+                attachments = body.normalized_attachments()
+                if attachments and session:
+                    session.state["attached_documents"] = [
+                        a.text[:_MAX_ATTACHMENT_CHARS] for a in attachments
+                    ]
             except Exception as e:
                 print(f"Session error: {e}")
 
@@ -108,23 +140,23 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
             # only, nothing reads it back out, so without this the model never sees
             # what the user attached.
             message_parts = []
-            if body.attached_context:
+            for att in body.normalized_attachments():
                 header = "[Documento adjunto"
-                if body.attached_file_name:
-                    header += f": {body.attached_file_name}"
+                if att.file_name:
+                    header += f": {att.file_name}"
                 header += "]"
                 # Real Drive files carry their ID so agents can act on the file
                 # itself (edit the Sheet, extend the Doc/Slides) — synthetic
                 # "local:" ids from device uploads are deliberately omitted:
                 # those files don't exist in Drive and the ID would only bait
                 # the model into calling Drive tools that must fail.
-                if body.attached_file_id and not body.attached_file_id.startswith("local:"):
-                    header += f"\n[drive_file_id: {body.attached_file_id}"
-                    if body.attached_mime_type:
-                        header += f" | mimeType: {body.attached_mime_type}"
+                if att.file_id and not att.file_id.startswith("local:"):
+                    header += f"\n[drive_file_id: {att.file_id}"
+                    if att.mime_type:
+                        header += f" | mimeType: {att.mime_type}"
                     header += "]"
                 message_parts.append(types.Part.from_text(
-                    text=f"{header}\n{body.attached_context[:8000]}"
+                    text=f"{header}\n{att.text[:_MAX_ATTACHMENT_CHARS]}"
                 ))
             message_parts.append(types.Part.from_text(text=body.message))
 
@@ -181,8 +213,9 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                     break
                 except Exception as run_err:
                     if _is_quota_error(run_err) and not full_response and attempt < _MAX_QUOTA_ATTEMPTS:
-                        print(f"Quota 429 on attempt {attempt}, retrying in {2 * attempt}s", flush=True)
-                        await asyncio.sleep(2 * attempt)
+                        delay = _QUOTA_BACKOFF[attempt - 1] + random.uniform(0, 1.5)
+                        print(f"Quota 429 on attempt {attempt}, retrying in {delay:.1f}s", flush=True)
+                        await asyncio.sleep(delay)
                         continue
                     raise
 

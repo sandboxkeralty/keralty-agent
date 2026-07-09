@@ -63,7 +63,8 @@
     "formatsHelp": "Supported formats: PDF, DOCX, TXT, CSV, MD — max. 50 MB",
     "close": "Close",
     "searchButton": "Search",
-    "noDocuments": "No documents found"
+    "noDocuments": "No documents found",
+    "tooManyFiles": "Maximum 5 attached files per message."
   },
   "sidebar": {
     "today": "Today",

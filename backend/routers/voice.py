@@ -43,7 +43,7 @@ async def voice_stream(websocket: WebSocket):
     await websocket.accept()
     await _safe_send(websocket, {"type": "status", "message": "connected"})
 
-    client = get_genai_client()
+    client = get_genai_client(force_vertex=True)
     # gemini-live-2.5-flash-native-audio is the only GA Live model on Vertex AI, and it only
     # supports AUDIO response modality (TEXT is rejected outright). This app only needs a
     # transcript of what the user said, not a spoken reply, so we request input audio

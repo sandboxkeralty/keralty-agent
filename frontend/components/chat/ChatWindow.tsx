@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import type { AnchorHTMLAttributes, ImgHTMLAttributes } from 'react';
-import { Send, Bot, User, Paperclip, X, Download, Volume2, Loader2 } from 'lucide-react';
+import { Send, Bot, User, Paperclip, X, Download, Volume2, Loader2, Cloud, HardDrive } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { SourceChip } from './SourceChip';
@@ -98,7 +98,7 @@ export function ChatWindow() {
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
-  const [attachedDoc, setAttachedDoc] = useState<{ file: DriveFile; text: string } | null>(null);
+  const [attachedDocs, setAttachedDocs] = useState<{ file: DriveFile; text: string }[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
@@ -213,6 +213,19 @@ export function ChatWindow() {
     }, 100);
   };
 
+  const MAX_ATTACHED_FILES = 5;
+
+  const appendAttachment = (doc: { file: DriveFile; text: string }): boolean => {
+    let ok = true;
+    setAttachedDocs(prev => {
+      if (prev.some(d => d.file.id === doc.file.id)) return prev;
+      if (prev.length >= MAX_ATTACHED_FILES) { ok = false; return prev; }
+      return [...prev, doc];
+    });
+    if (!ok) setUploadError(td('tooManyFiles'));
+    return ok;
+  };
+
   const handleSelectDoc = async (file: DriveFile) => {
     setShowPicker(false);
     setUploadError('');
@@ -220,7 +233,7 @@ export function ChatWindow() {
       const res = await apiFetch(`/documents/${file.id}/text`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || td('uploadFailed'));
-      setAttachedDoc({ file, text: data.text });
+      appendAttachment({ file, text: data.text });
     } catch (e) {
       if (e instanceof UnauthorizedError) return;
       setUploadError(e instanceof Error ? e.message : String(e));
@@ -239,7 +252,7 @@ export function ChatWindow() {
       const res = await apiFetch(`/documents/upload`, { method: 'POST', body: form });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || td('uploadFailed'));
-      setAttachedDoc({
+      appendAttachment({
         file: { id: `local:${crypto.randomUUID()}`, name: data.filename, mimeType: file.type || 'application/octet-stream' },
         text: data.text,
       });
@@ -306,11 +319,13 @@ export function ChatWindow() {
         body: JSON.stringify({
           message: userMessage.content,
           session_id: sessionId,
-          ...(attachedDoc ? {
-            attached_context: attachedDoc.text,
-            attached_file_id: attachedDoc.file.id,
-            attached_file_name: attachedDoc.file.name,
-            attached_mime_type: attachedDoc.file.mimeType,
+          ...(attachedDocs.length > 0 ? {
+            attached_files: attachedDocs.map(d => ({
+              text: d.text,
+              file_id: d.file.id,
+              file_name: d.file.name,
+              mime_type: d.file.mimeType,
+            })),
           } : {}),
         }),
       });
@@ -374,7 +389,7 @@ export function ChatWindow() {
       setMessages(prev => prev.map(m =>
         m.id === assistantId && !sawError ? { ...m, isStreaming: false } : m
       ));
-      setAttachedDoc(null);
+      setAttachedDocs([]);
       bumpHistoryRefresh();
     } catch (err) {
       if (err instanceof UnauthorizedError) {
@@ -488,15 +503,18 @@ export function ChatWindow() {
         </div>
       )}
       <form ref={formRef} onSubmit={handleSubmit} className="p-4 border-t border-[var(--color-border)] bg-white">
-        {attachedDoc && (
-          <div className="flex items-center gap-2 mb-2 px-1">
-            <span className="flex items-center gap-1.5 text-xs bg-[var(--color-primary-light)] text-[var(--color-navy)] px-2 py-1 rounded-full border border-[var(--color-primary)]/30">
-              <Paperclip size={11} />
-              {attachedDoc.file.name}
-              <button type="button" onClick={() => setAttachedDoc(null)} className="ml-1 hover:text-red-500">
-                <X size={11} />
-              </button>
-            </span>
+        {attachedDocs.length > 0 && (
+          <div className="flex items-center flex-wrap gap-2 mb-2 px-1">
+            {attachedDocs.map(doc => (
+              <span key={doc.file.id} className="flex items-center gap-1.5 text-xs bg-[var(--color-primary-light)] text-[var(--color-navy)] px-2 py-1 rounded-full border border-[var(--color-primary)]/30">
+                {/* Source-distinct icon: HardDrive = uploaded from device, Cloud = Google Drive */}
+                {doc.file.id.startsWith('local:') ? <HardDrive size={11} /> : <Cloud size={11} />}
+                {doc.file.name}
+                <button type="button" onClick={() => setAttachedDocs(prev => prev.filter(d => d.file.id !== doc.file.id))} className="ml-1 hover:text-red-500">
+                  <X size={11} />
+                </button>
+              </span>
+            ))}
           </div>
         )}
         {uploadError && (
