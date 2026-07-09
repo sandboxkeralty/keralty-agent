@@ -17,10 +17,21 @@ Deployed on Google Cloud Run in the `keraltysandbox` GCP project (`us-central1`)
 
 - **Chats like Claude.ai / ChatGPT** — a persistent sidebar with grouped conversation history
   (Hoy / Ayer / Últimos 7 días), instant switching between conversations, and a working "new
-  conversation" that actually resets state.
+  conversation" that actually resets state. Conversation memory survives restarts, redeploys
+  and scale-out (ADK events persist to Firestore), and a live status label shows what the
+  assistant is doing ("Consultando la base de conocimiento…") instead of a blinking cursor.
+- **Writes in each executive's personal style** — predefined styles plus custom ones
+  distilled from the executive's own sample documents (reviewed and approved by them before
+  use), selectable per conversation from the chat composer.
+- **Designs real presentations** — every deck starts from the corporate template, uses a
+  layout engine (cover, sections, two columns, big-number and quote slides, hero slides with
+  full-bleed 16:9 art-directed images) and a narrative-arc design system, behind the same
+  outline-approval flow.
 - **Reads and writes Google Workspace** — creates and edits Docs, Sheets (including uploaded
-  `.xlsx`/`.xls` files, not just native Google Sheets), and Slides, always behind an explicit
-  approval step before anything is written.
+  `.xlsx`/`.xls` files, not just native Google Sheets — and full tab management: add, rename,
+  delete with approval), and Slides, always behind an explicit approval step before anything
+  destructive is written. Chat attachments (up to 5, from Drive or the device) carry their
+  Drive file ID so agents can work on the file itself, not just its text.
 - **Searches and reasons over a corporate Knowledge Base** — a hybrid BM25 + dense-embedding
   retrieval pipeline with Gemini reranking and an abstention gate, so the assistant says "I
   don't know" instead of guessing.
@@ -53,7 +64,7 @@ flowchart TB
     subgraph Backend["FastAPI Backend — Cloud Run"]
         Auth["Auth Middleware<br/>JWT + Google OAuth"]
         Runner["ADK Runner<br/>Firestore-backed sessions"]
-        Orch["OrchestratorAgent<br/>gemini-2.5-flash"]
+        Orch["OrchestratorAgent<br/>gemini-flash-latest"]
 
         subgraph SubAgents["Specialised Sub-Agents"]
             direction LR
@@ -80,7 +91,7 @@ flowchart TB
         direction LR
         Workspace["Drive · Docs · Sheets<br/>Slides · Gmail"]
         VertexAI["Vertex AI<br/>Gemini · Imagen 3<br/>Live API · TTS"]
-        Firestore[("Firestore<br/>sessions · messages · tasks<br/>users · audit_events")]
+        Firestore[("Firestore<br/>sessions · messages · tasks<br/>users · writing_styles · audit_events")]
         GCS[("Cloud Storage<br/>images/ · kb/")]
     end
 
@@ -134,10 +145,10 @@ attachment — cannot trigger a send or write.
 
 | Layer | Technology |
 |---|---|
-| Agent orchestration | Google Agent Development Kit (ADK), Gemini 2.5 Flash/Pro |
+| Agent orchestration | Google Agent Development Kit (ADK), Gemini rolling aliases (`gemini-flash-latest` / `gemini-pro-latest`) |
 | Backend | FastAPI, Python 3.11, Uvicorn |
 | Frontend | Next.js 15 (App Router, Turbopack), TypeScript, Tailwind CSS v4 |
-| AI models | Gemini 2.5 Flash/Pro, Gemini Live API, Gemini TTS, Imagen 3, text-embedding-005 |
+| AI models | Gemini (flash/pro rolling aliases via AI Studio key), Gemini Live API + Imagen 3 + text-embedding-005 (Vertex AI), Gemini TTS |
 | Retrieval | rank-bm25 (sparse) + Vertex AI embeddings (dense), Reciprocal Rank Fusion |
 | Data | Firestore (sessions, messages, tasks, KB chunks, audit log), Cloud Storage |
 | Auth | Google OAuth 2.0 (PKCE) + JWT (python-jose) |
@@ -224,9 +235,11 @@ backend/
   auth/            OAuth flow + JWT middleware
 
 frontend/
-  app/[locale]/    Routed pages (chat, email, admin) — i18n via next-intl
+  app/[locale]/    Routed pages (chat, email, estilos, admin) — i18n via next-intl
   components/      Chat UI, layout (Sidebar/Navbar), document picker, approval cards
   hooks/           Shared client state (ChatSessionContext)
+
+backend/scripts/   One-off ops scripts (Slides template upload + layout probe)
 
 docs/              Product roadmap and use-case test scripts
 branding/          Official Keralty brand assets (palette, logo, template)
