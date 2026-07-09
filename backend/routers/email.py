@@ -103,9 +103,11 @@ def get_email_summary(request: Request, tz: Optional[str] = None):
         warnings.append("pendientes")
 
     try:
+        # "in" keeps drafted follow-ups visible (with a status badge) instead of
+        # vanishing from Seguimiento the moment their draft is generated.
         tracked_docs = db.collection("email_tracking").where(
             "user_id", "==", user_id
-        ).where("status", "==", "waiting").stream()
+        ).where("status", "in", ["waiting", "followup_drafted"]).stream()
         tracked = [{"tracking_id": doc.id, **doc.to_dict()} for doc in tracked_docs]
         for t in tracked:
             if "deadline" in t and hasattr(t["deadline"], "isoformat"):

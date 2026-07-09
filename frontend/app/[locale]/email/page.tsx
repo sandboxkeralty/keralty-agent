@@ -63,6 +63,8 @@ export default function EmailPage() {
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [followupResult, setFollowupResult] = useState<Record<string, FollowupResult>>({});
   const [warnings, setWarnings] = useState<string[]>([]);
+  // null = show all; a Priority filters the inbox list to that badge.
+  const [priorityFilter, setPriorityFilter] = useState<Priority | null>(null);
   const handleGenerateFollowup = async (trackingId: string) => {
     setGeneratingId(trackingId);
     setFollowupResult(prev => {
@@ -75,6 +77,9 @@ export default function EmailPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.detail || t('followupError'));
       setFollowupResult(prev => ({ ...prev, [trackingId]: { subject: data.subject, body: data.body } }));
+      // The backend just flipped the tracking status to followup_drafted —
+      // refresh so the badge reflects it without a manual reload.
+      fetchSummary();
     } catch (e) {
       if (e instanceof UnauthorizedError) return;
       setFollowupResult(prev => ({ ...prev, [trackingId]: { error: e instanceof Error ? e.message : t('followupError') } }));
@@ -125,18 +130,30 @@ export default function EmailPage() {
         </button>
       </div>
 
-      {/* Stats bar */}
+      {/* Stats bar — tiles double as filters/navigation */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         {[
-          { label: t('inboxIndicator'), value: indicators.bandeja, color: 'text-[var(--color-primary)]' },
-          { label: t('criticalIndicator'), value: indicators.criticos, color: 'text-red-500' },
-          { label: t('pendingIndicator'), value: indicators.pendientes, color: 'text-orange-500' },
-          { label: t('followupIndicator'), value: indicators.seguimiento, color: 'text-yellow-600' },
+          { label: t('inboxIndicator'), value: indicators.bandeja, color: 'text-[var(--color-primary)]',
+            onClick: () => { setActiveTab('inbox'); setPriorityFilter(null); },
+            active: activeTab === 'inbox' && priorityFilter === null },
+          { label: t('criticalIndicator'), value: indicators.criticos, color: 'text-red-500',
+            onClick: () => { setActiveTab('inbox'); setPriorityFilter('CRITICO'); },
+            active: activeTab === 'inbox' && priorityFilter === 'CRITICO' },
+          { label: t('pendingIndicator'), value: indicators.pendientes, color: 'text-orange-500',
+            onClick: undefined, active: false },
+          { label: t('followupIndicator'), value: indicators.seguimiento, color: 'text-yellow-600',
+            onClick: () => setActiveTab('tracking'), active: activeTab === 'tracking' },
         ].map(s => (
-          <div key={s.label} className="bg-white border border-[var(--color-border)] rounded-[12px] p-3 text-center shadow-sm">
+          <button
+            key={s.label}
+            type="button"
+            onClick={s.onClick}
+            disabled={!s.onClick}
+            className={`bg-white border rounded-[12px] p-3 text-center shadow-sm transition-colors ${s.active ? 'border-[var(--color-primary)] ring-1 ring-[var(--color-primary)]/40' : 'border-[var(--color-border)]'} ${s.onClick ? 'cursor-pointer hover:border-[var(--color-primary)]/60' : 'cursor-default'}`}
+          >
             <span className={`text-2xl font-bold ${s.color}`}>{s.value}</span>
             <p className="text-xs text-[var(--color-text-muted)] uppercase mt-0.5">{s.label}</p>
-          </div>
+          </button>
         ))}
       </div>
 
@@ -162,6 +179,29 @@ export default function EmailPage() {
       {/* Content */}
       {activeTab === 'inbox' && (
         <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm">
+          {/* Per-priority filter chips */}
+          {!loading && threads.length > 0 && (
+            <div className="flex items-center flex-wrap gap-2 p-3 border-b border-[var(--color-border)]">
+              {(['CRITICO', 'ALTO', 'MEDIO', 'BAJO'] as Priority[]).map(p => {
+                const count = threads.filter(th => th.priority === p).length;
+                return (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => setPriorityFilter(prev => prev === p ? null : p)}
+                    className={`text-[10px] font-semibold uppercase px-2 py-1 rounded-full border transition-colors ${PRIORITY_STYLES[p]} ${priorityFilter === p ? 'ring-2 ring-[var(--color-navy)]/40' : 'opacity-80 hover:opacity-100'}`}
+                  >
+                    {t(PRIORITY_KEY[p])} · {count}
+                  </button>
+                );
+              })}
+              {priorityFilter && (
+                <button type="button" onClick={() => setPriorityFilter(null)} className="text-xs text-[var(--color-text-muted)] underline ml-1">
+                  {t('clearFilter')}
+                </button>
+              )}
+            </div>
+          )}
           {loading ? (
             <div className="flex items-center justify-center h-48 gap-2 text-[var(--color-text-muted)]">
               <Loader2 className="h-4 w-4 animate-spin" /> {t('loadingEmails')}
@@ -178,7 +218,7 @@ export default function EmailPage() {
             </div>
           ) : (
             <ul className="divide-y divide-[var(--color-border)]">
-              {threads.map(thread => (
+              {threads.filter(th => !priorityFilter || th.priority === priorityFilter).map(thread => (
                 <li key={thread.id} className="p-4 hover:bg-[var(--color-background)] transition-colors">
                   <div className="flex justify-between items-start mb-1 gap-2">
                     <div className="flex items-center gap-2 min-w-0">
@@ -217,7 +257,14 @@ export default function EmailPage() {
               {tracked.map(item => (
                 <li key={item.tracking_id} className="p-4 flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium text-[var(--color-navy)]">{item.subject || t('noSubject')}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-medium text-[var(--color-navy)]">{item.subject || t('noSubject')}</p>
+                      {item.status === 'followup_drafted' ? (
+                        <span className="shrink-0 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">{t('statusDrafted')}</span>
+                      ) : (
+                        <span className="shrink-0 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">{t('statusWaiting')}</span>
+                      )}
+                    </div>
                     {item.to && (
                       <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{t('to')} {item.to}</p>
                     )}
@@ -246,7 +293,7 @@ export default function EmailPage() {
                     ) : (
                       <Send className="h-3 w-3" />
                     )}
-                    {t('generateFollowup')}
+                    {item.status === 'followup_drafted' ? t('regenerateFollowup') : t('generateFollowup')}
                   </button>
                 </li>
               ))}

@@ -23,6 +23,27 @@ _QUOTA_BACKOFF = [2, 5, 10]
 _MAX_ATTACHED_FILES = 5
 _MAX_ATTACHMENT_CHARS = 8000
 
+_EN_WORDS = (" the ", " what ", " can ", " you ", " how ", " please ", " is ", " are ",
+             " of ", " to ", " my ", " me ", " about ", " with ")
+_ES_WORDS = (" el ", " la ", " de ", " que ", " para ", " con ", " una ", " un ",
+             " los ", " por ", " mi ", " sobre ", " y ")
+
+
+def _is_english(text: str) -> bool:
+    """Cheap language sniff for the reply-language hint.
+
+    Prompt rules alone proved insufficient in production: with an all-Spanish
+    instruction corpus and Spanish tool results, agents answered English
+    questions in Spanish even with a top-priority language rule. A per-turn
+    deterministic hint fixes what prompt wording couldn't.
+    """
+    t = f" {text.lower()} "
+    if any(c in t for c in "¿¡áéíóúñ"):
+        return False
+    en = sum(1 for w in _EN_WORDS if w in t)
+    es = sum(1 for w in _ES_WORDS if w in t)
+    return en > es and en >= 2
+
 
 def _is_quota_error(e: Exception) -> bool:
     # Vertex 429s surface through ADK as e.g. `_ResourceExhaustedError` with
@@ -188,6 +209,11 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                     text=f"{header}\n{att.text[:_MAX_ATTACHMENT_CHARS]}"
                 ))
             message_parts.append(types.Part.from_text(text=body.message))
+            if _is_english(body.message):
+                message_parts.append(types.Part.from_text(
+                    text="[System note: the user's message above is in ENGLISH — "
+                         "your entire reply must be in English.]"
+                ))
 
             full_response = ""
             last_status = None

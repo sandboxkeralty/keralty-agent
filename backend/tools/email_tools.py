@@ -133,7 +133,7 @@ async def email_get_tracking(tool_context: ToolContext) -> dict:
         user_id = state.get("user_id") or "unknown"
         docs = db.collection("email_tracking").where(
             "user_id", "==", user_id
-        ).where("status", "==", "waiting").stream()
+        ).where("status", "in", ["waiting", "followup_drafted"]).stream()
         tracked = [{"tracking_id": doc.id, **doc.to_dict()} for doc in docs]
         return {"status": "success", "tracked_emails": tracked}
     except Exception as e:

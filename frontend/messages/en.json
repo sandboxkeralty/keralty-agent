@@ -150,7 +150,11 @@
     "priorityCritical": "Critical",
     "priorityHigh": "High",
     "priorityMedium": "Medium",
-    "priorityLow": "Low"
+    "priorityLow": "Low",
+    "statusWaiting": "Awaiting reply",
+    "statusDrafted": "Draft created",
+    "regenerateFollowup": "Regenerate follow-up",
+    "clearFilter": "Clear filter"
   },
   "errors": {
     "networkError": "Connection error. Please check your internet connection.",

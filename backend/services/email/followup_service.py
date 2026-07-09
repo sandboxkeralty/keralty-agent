@@ -98,4 +98,17 @@ def generate_followup_draft(tracking_id: str, credentials=None) -> dict:
     draft_id = GmailProvider.create_draft(
         to=to, subject=reply_subject, body=body, thread_id=thread_id, credentials=credentials
     )
+    # Progress the tracking record so the dashboard shows "borrador creado"
+    # instead of the item sitting in Seguimiento looking untouched (a reported
+    # test finding). Best-effort: a failed status write must not undo the
+    # already-created draft.
+    try:
+        from datetime import datetime, timezone
+        db.collection("email_tracking").document(tracking_id).update({
+            "status": "followup_drafted",
+            "followup_draft_id": draft_id,
+            "followup_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as status_err:
+        print(f"[followup_service] status update failed: {status_err}")
     return {"draft_id": draft_id, "subject": reply_subject, "to": to, "body": body}

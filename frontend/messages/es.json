@@ -150,7 +150,11 @@
     "priorityCritical": "Crítico",
     "priorityHigh": "Alto",
     "priorityMedium": "Medio",
-    "priorityLow": "Bajo"
+    "priorityLow": "Bajo",
+    "statusWaiting": "Esperando respuesta",
+    "statusDrafted": "Borrador creado",
+    "regenerateFollowup": "Regenerar seguimiento",
+    "clearFilter": "Quitar filtro"
   },
   "errors": {
     "networkError": "Error de conexión. Por favor verifica tu conexión a internet.",
