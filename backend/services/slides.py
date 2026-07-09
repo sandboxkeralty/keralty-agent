@@ -10,21 +10,32 @@ _SLIDES_SCOPES = [
     'https://www.googleapis.com/auth/drive',
 ]
 
-# Default Google Slides 16:9 canvas, EMU.
+# Default Google Slides 16:9 canvas, EMU — FALLBACK ONLY. The real page size
+# MUST be read per deck: a template copied from a converted PPTX is typically
+# 12,192,000 x 6,858,000 EMU (13.33"x7.5"), and hardcoding the Google default
+# shipped "full-bleed" images that covered only ~75% of the slide.
 SLIDE_W = 9_144_000
 SLIDE_H = 5_143_500
 
-# Image placement presets. All are exact 16:9 footprints so a 16:9 Imagen
-# output fills the box deterministically (createImage scales-to-fit preserving
-# aspect and centers — a non-16:9 box would letterbox unpredictably). There is
-# deliberately no banner/strip preset: Slides' cropProperties is read-only via
-# the API, so a 16:3 crop of a 16:9 image is not achievable.
-_PLACEMENTS = {
-    'full_bleed': (0, 0, SLIDE_W, SLIDE_H),
-    'right_half': (SLIDE_W // 2, SLIDE_H // 4, SLIDE_W // 2, SLIDE_H // 2),
-    'left_half': (0, SLIDE_H // 4, SLIDE_W // 2, SLIDE_H // 2),
-    'centered': (SLIDE_W // 8, SLIDE_H // 8, SLIDE_W * 3 // 4, SLIDE_H * 3 // 4),
+# Brand accents (current branding — see branding/ and CLAUDE.md).
+NAVY = {'red': 0.0, 'green': 0.125, 'blue': 0.376}   # #002060
+WHITE = {'red': 1.0, 'green': 1.0, 'blue': 1.0}
+
+# Image placement presets as FRACTIONS of the actual page size. All are exact
+# 16:9-proportioned footprints on a 16:9 page, so a 16:9 Imagen output fills
+# the box deterministically. No banner/strip preset: Slides' cropProperties is
+# read-only via the API.
+_PLACEMENT_FRACTIONS = {
+    'full_bleed': (0.0, 0.0, 1.0, 1.0),
+    'right_half': (0.5, 0.25, 0.5, 0.5),
+    'left_half': (0.0, 0.25, 0.5, 0.5),
+    'centered': (0.125, 0.125, 0.75, 0.75),
 }
+
+
+def _placement_emu(name: str, page_w: int, page_h: int):
+    fx, fy, fw, fh = _PLACEMENT_FRACTIONS.get(name, _PLACEMENT_FRACTIONS['right_half'])
+    return int(fx * page_w), int(fy * page_h), int(fw * page_w), int(fh * page_h)
 
 # Semantic layout -> Slides predefinedLayout, used when the deck has no usable
 # template layout map (blank decks, or unmapped semantics).
@@ -101,11 +112,19 @@ class SlidesService:
         service = get_slides_service(credentials)
         pres = service.presentations().get(
             presentationId=presentation_id,
-            fields="layouts(objectId,layoutProperties(name,displayName),"
+            fields="pageSize,layouts(objectId,layoutProperties(name,displayName),"
                    "pageElements(objectId,shape(placeholder(type,index))))",
         ).execute()
 
-        layout_map: dict = {}
+        def _emu(dim, default):
+            mag = dim.get('magnitude', default)
+            return int(mag * 12_700) if dim.get('unit') == 'PT' else int(mag)
+
+        page = pres.get('pageSize', {})
+        layout_map: dict = {'_page': {
+            'w': _emu(page.get('width', {}), SLIDE_W),
+            'h': _emu(page.get('height', {}), SLIDE_H),
+        }}
 
         def _claim(semantic, layout, phs):
             if semantic not in layout_map:
@@ -167,6 +186,23 @@ class SlidesService:
         """
         service = get_slides_service(credentials)
         layout_map = layout_map or {}
+        if '_page' not in layout_map:
+            # Standalone call without a resolver map: read the real page size —
+            # template decks are PPTX-sized (12.19M x 6.86M EMU), NOT the Google
+            # default, and hardcoding it breaks every placement.
+            try:
+                pres = service.presentations().get(
+                    presentationId=presentation_id, fields="pageSize").execute()
+                pg = pres.get('pageSize', {})
+                layout_map = dict(layout_map)
+                layout_map['_page'] = {
+                    'w': int(pg.get('width', {}).get('magnitude', SLIDE_W)),
+                    'h': int(pg.get('height', {}).get('magnitude', SLIDE_H)),
+                }
+            except Exception:
+                layout_map['_page'] = {'w': SLIDE_W, 'h': SLIDE_H}
+        page_w = layout_map['_page']['w']
+        page_h = layout_map['_page']['h']
         slide_id = f"slide_{uuid.uuid4().hex[:12]}"
 
         layout = spec.get('layout') or 'content'
@@ -248,30 +284,42 @@ class SlidesService:
                     if layout == 'cover' else []
                 ),
             }})
-            if layout not in ('quote', 'big_number') and title:
-                text_fills.append((f'{slide_id}_title', title))
-            if layout == 'cover' and subtitle:
-                text_fills.append((f'{slide_id}_subtitle', subtitle))
-            if layout == 'content' and bullets:
-                text_fills.append((f'{slide_id}_body0', '\n'.join(bullets)))
+            tid = f'{slide_id}_title' if layout not in ('quote', 'big_number') else None
+            sid = f'{slide_id}_subtitle' if layout == 'cover' else None
+            b0 = f'{slide_id}_body0' if layout in ('content', 'two_column') else None
+            b1 = f'{slide_id}_body1' if layout == 'two_column' else None
+            if tid and title:
+                text_fills.append((tid, title))
+            if sid and subtitle:
+                text_fills.append((sid, subtitle))
+            if layout == 'content' and bullets and b0:
+                text_fills.append((b0, '\n'.join(bullets)))
             if layout == 'two_column' and spec.get('columns'):
-                for i, col in enumerate(spec['columns'][:2]):
+                for oid, col in zip([b0, b1], spec['columns'][:2]):
                     heading = col.get('heading', '')
                     col_lines = ([heading] if heading else []) + list(col.get('bullets', []))
-                    text_fills.append((f'{slide_id}_body{i}', '\n'.join(col_lines)))
+                    text_fills.append((oid, '\n'.join(col_lines)))
             if layout in ('section', 'closing') and subtitle:
                 # SECTION_HEADER has no body; put subtitle in a manual box
-                manual_boxes.append((subtitle, 1_143_000, 3_000_000, 6_858_000, 900_000,
-                                     {'fontSize': {'magnitude': 18, 'unit': 'PT'}},
-                                     'fontSize', 'CENTER'))
+                manual_boxes.append((subtitle, 0.125, 0.58, 0.75, 0.15,
+                                     {'fontSize': {'magnitude': 18, 'unit': 'PT'},
+                                      'foregroundColor': {'opaqueColor': {'rgbColor': NAVY}}},
+                                     'fontSize,foregroundColor', 'CENTER'))
 
-        # -- image (before manual text boxes so text z-orders on top) --------
+        # -- image + hero treatment -------------------------------------------
+        # Full-bleed images behind text need the classic hero recipe: image at
+        # the very back, a dark scrim above it, and WHITE title text — otherwise
+        # the image (created after the placeholders) paints over the title.
         image_url = spec.get('image_url')
+        placement_name = spec.get('image_placement') or 'right_half'
+        hero = bool(image_url) and placement_name == 'full_bleed' and bool(title or subtitle)
+        image_id = None
+        scrim_id = None
         if image_url:
-            x, y, w, h = _PLACEMENTS.get(spec.get('image_placement') or 'right_half',
-                                         _PLACEMENTS['right_half'])
+            x, y, w, h = _placement_emu(placement_name, page_w, page_h)
+            image_id = f'img_{uuid.uuid4().hex[:12]}'
             requests.append({'createImage': {
-                'objectId': f'img_{uuid.uuid4().hex[:12]}',
+                'objectId': image_id,
                 'url': image_url,
                 'elementProperties': {
                     'pageObjectId': slide_id,
@@ -281,39 +329,69 @@ class SlidesService:
                                   'translateX': x, 'translateY': y, 'unit': 'EMU'},
                 },
             }})
+            if hero:
+                scrim_id = f'scrim_{uuid.uuid4().hex[:10]}'
+                requests.append({'createShape': {
+                    'objectId': scrim_id, 'shapeType': 'RECTANGLE',
+                    'elementProperties': {
+                        'pageObjectId': slide_id,
+                        'size': {'width': {'magnitude': page_w, 'unit': 'EMU'},
+                                 'height': {'magnitude': page_h, 'unit': 'EMU'}},
+                        'transform': {'scaleX': 1, 'scaleY': 1,
+                                      'translateX': 0, 'translateY': 0, 'unit': 'EMU'},
+                    },
+                }})
+                requests.append({'updateShapeProperties': {
+                    'objectId': scrim_id,
+                    'shapeProperties': {
+                        'shapeBackgroundFill': {'solidFill': {
+                            'color': {'rgbColor': NAVY}, 'alpha': 0.45}},
+                        'outline': {'propertyState': 'NOT_RENDERED'},
+                    },
+                    'fields': 'shapeBackgroundFill.solidFill,outline.propertyState',
+                }})
+                # Paint order after these two: image (very back), scrim above
+                # it, theme placeholders (created first) on top.
+                requests.append({'updatePageElementsZOrder': {
+                    'pageElementObjectIds': [scrim_id], 'operation': 'SEND_TO_BACK'}})
+                requests.append({'updatePageElementsZOrder': {
+                    'pageElementObjectIds': [image_id], 'operation': 'SEND_TO_BACK'}})
 
-        # -- composite layouts: quote / big_number ---------------------------
+        # -- composite layouts: quote / big_number (page-fraction boxes) ------
         if layout == 'quote':
             manual_boxes.append((f'“{spec.get("quote", title)}”',
-                                 914_400, 1_543_050, 7_315_200, 2_057_400,
-                                 {'italic': True, 'fontSize': {'magnitude': 28, 'unit': 'PT'}},
-                                 'italic,fontSize', 'CENTER'))
+                                 0.10, 0.30, 0.80, 0.30,
+                                 {'italic': True, 'fontSize': {'magnitude': 30, 'unit': 'PT'},
+                                  'foregroundColor': {'opaqueColor': {'rgbColor': NAVY}}},
+                                 'italic,fontSize,foregroundColor', 'CENTER'))
             if spec.get('attribution'):
                 manual_boxes.append((f'— {spec["attribution"]}',
-                                     914_400, 3_700_000, 7_315_200, 600_000,
+                                     0.10, 0.64, 0.80, 0.10,
                                      {'fontSize': {'magnitude': 14, 'unit': 'PT'}},
                                      'fontSize', 'END'))
         elif layout == 'big_number':
             manual_boxes.append((spec.get('number', title),
-                                 914_400, 1_200_000, 7_315_200, 1_600_000,
-                                 {'bold': True, 'fontSize': {'magnitude': 96, 'unit': 'PT'}},
-                                 'bold,fontSize', 'CENTER'))
+                                 0.10, 0.22, 0.80, 0.34,
+                                 {'bold': True, 'fontSize': {'magnitude': 110, 'unit': 'PT'},
+                                  'foregroundColor': {'opaqueColor': {'rgbColor': NAVY}}},
+                                 'bold,fontSize,foregroundColor', 'CENTER'))
             if spec.get('caption'):
                 manual_boxes.append((spec['caption'],
-                                     914_400, 3_100_000, 7_315_200, 900_000,
-                                     {'fontSize': {'magnitude': 18, 'unit': 'PT'}},
+                                     0.10, 0.60, 0.80, 0.15,
+                                     {'fontSize': {'magnitude': 20, 'unit': 'PT'}},
                                      'fontSize', 'CENTER'))
 
-        for text, x, y, w, h, style, fields, align in manual_boxes:
+        for text, fx, fy, fw, fh, style, fields, align in manual_boxes:
             box_id = f'box_{uuid.uuid4().hex[:10]}'
             requests.append({'createShape': {
                 'objectId': box_id, 'shapeType': 'TEXT_BOX',
                 'elementProperties': {
                     'pageObjectId': slide_id,
-                    'size': {'width': {'magnitude': w, 'unit': 'EMU'},
-                             'height': {'magnitude': h, 'unit': 'EMU'}},
+                    'size': {'width': {'magnitude': int(fw * page_w), 'unit': 'EMU'},
+                             'height': {'magnitude': int(fh * page_h), 'unit': 'EMU'}},
                     'transform': {'scaleX': 1, 'scaleY': 1,
-                                  'translateX': x, 'translateY': y, 'unit': 'EMU'},
+                                  'translateX': int(fx * page_w),
+                                  'translateY': int(fy * page_h), 'unit': 'EMU'},
                 },
             }})
             requests.append({'insertText': {'objectId': box_id, 'insertionIndex': 0,
@@ -326,11 +404,35 @@ class SlidesService:
                                                       'style': {'alignment': align},
                                                       'fields': 'alignment'}})
 
-        # -- placeholder text fills ------------------------------------------
+        # -- placeholder text fills + typography hierarchy ---------------------
+        body_ids_filled = []
         for oid, text in text_fills:
             if text:
                 requests.append({'insertText': {'objectId': oid, 'insertionIndex': 0,
                                                 'text': text}})
+                if oid.endswith(('_body0', '_body1')) and '\n' in text:
+                    body_ids_filled.append(oid)
+
+        # Title color: white over a hero image (theme text would vanish into
+        # the photo), brand navy otherwise (the template's content layouts are
+        # plain black — hierarchy needs color, per the design skill).
+        title_ids = [oid for oid, t in text_fills if oid.endswith(('_title', '_subtitle')) and t]
+        for oid in title_ids:
+            color = WHITE if hero else NAVY
+            requests.append({'updateTextStyle': {
+                'objectId': oid, 'textRange': {'type': 'ALL'},
+                'style': {'bold': True,
+                          'foregroundColor': {'opaqueColor': {'rgbColor': color}}},
+                'fields': 'bold,foregroundColor',
+            }})
+
+        # Real bullets on multi-line bodies — the converted template's layouts
+        # don't apply list formatting on their own.
+        for oid in body_ids_filled:
+            requests.append({'createParagraphBullets': {
+                'objectId': oid, 'textRange': {'type': 'ALL'},
+                'bulletPreset': 'BULLET_DISC_CIRCLE_SQUARE',
+            }})
 
         # -- optional solid background ---------------------------------------
         if spec.get('background_color'):
@@ -371,7 +473,7 @@ class SlidesService:
             slide_id = f"slide_{uuid.uuid4().hex[:12]}"
             fb = [{'createSlide': {'objectId': slide_id,
                                    'slideLayoutReference': {'predefinedLayout': 'BLANK'}}}]
-            y = 457_200
+            fy = 0.09
             for text, size, bold in [(title, 28, True),
                                      ('\n'.join(bullets) or subtitle, 16, False)]:
                 if not text:
@@ -381,10 +483,11 @@ class SlidesService:
                     {'createShape': {'objectId': box_id, 'shapeType': 'TEXT_BOX',
                                      'elementProperties': {
                                          'pageObjectId': slide_id,
-                                         'size': {'width': {'magnitude': 8_229_600, 'unit': 'EMU'},
-                                                  'height': {'magnitude': 1_200_000, 'unit': 'EMU'}},
+                                         'size': {'width': {'magnitude': int(0.9 * page_w), 'unit': 'EMU'},
+                                                  'height': {'magnitude': int(0.23 * page_h), 'unit': 'EMU'}},
                                          'transform': {'scaleX': 1, 'scaleY': 1,
-                                                       'translateX': 457_200, 'translateY': y,
+                                                       'translateX': int(0.05 * page_w),
+                                                       'translateY': int(fy * page_h),
                                                        'unit': 'EMU'}}}},
                     {'insertText': {'objectId': box_id, 'insertionIndex': 0, 'text': text}},
                     {'updateTextStyle': {'objectId': box_id, 'textRange': {'type': 'ALL'},
@@ -392,7 +495,7 @@ class SlidesService:
                                                    'fontSize': {'magnitude': size, 'unit': 'PT'}},
                                          'fields': 'bold,fontSize'}},
                 ]
-                y += 1_400_000
+                fy += 0.27
             service.presentations().batchUpdate(
                 presentationId=presentation_id, body={'requests': fb}
             ).execute()
@@ -508,9 +611,17 @@ class SlidesService:
         `placement` (full_bleed | right_half | left_half | centered) overrides the
         four EMU args with a preset 16:9 footprint.
         """
-        if placement and placement in _PLACEMENTS:
-            left_emu, top_emu, width_emu, height_emu = _PLACEMENTS[placement]
         service = get_slides_service(credentials)
+        if placement and placement in _PLACEMENT_FRACTIONS:
+            try:
+                pg = service.presentations().get(
+                    presentationId=presentation_id, fields="pageSize"
+                ).execute().get('pageSize', {})
+                pw = int(pg.get('width', {}).get('magnitude', SLIDE_W))
+                ph = int(pg.get('height', {}).get('magnitude', SLIDE_H))
+            except Exception:
+                pw, ph = SLIDE_W, SLIDE_H
+            left_emu, top_emu, width_emu, height_emu = _placement_emu(placement, pw, ph)
         image_id = f"img_{uuid.uuid4().hex[:12]}"
         requests = [
             {
