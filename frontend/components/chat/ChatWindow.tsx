@@ -306,7 +306,12 @@ export function ChatWindow() {
         body: JSON.stringify({
           message: userMessage.content,
           session_id: sessionId,
-          ...(attachedDoc ? { attached_context: attachedDoc.text } : {}),
+          ...(attachedDoc ? {
+            attached_context: attachedDoc.text,
+            attached_file_id: attachedDoc.file.id,
+            attached_file_name: attachedDoc.file.name,
+            attached_mime_type: attachedDoc.file.mimeType,
+          } : {}),
         }),
       });
 

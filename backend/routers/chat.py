@@ -27,7 +27,13 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = "default-session"
     user_id: Optional[str] = "default-user"
-    attached_context: Optional[str] = None  # text content of an attached Drive document
+    attached_context: Optional[str] = None  # text content of an attached document
+    # Drive metadata of the attachment, when it came from Drive: lets agents
+    # operate on the real file (Docs/Sheets/Slides tools) instead of only its
+    # extracted text. Local uploads send a synthetic "local:<ts>" id.
+    attached_file_id: Optional[str] = None
+    attached_file_name: Optional[str] = None
+    attached_mime_type: Optional[str] = None
 
 @router.post("")
 async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
@@ -103,8 +109,22 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
             # what the user attached.
             message_parts = []
             if body.attached_context:
+                header = "[Documento adjunto"
+                if body.attached_file_name:
+                    header += f": {body.attached_file_name}"
+                header += "]"
+                # Real Drive files carry their ID so agents can act on the file
+                # itself (edit the Sheet, extend the Doc/Slides) — synthetic
+                # "local:" ids from device uploads are deliberately omitted:
+                # those files don't exist in Drive and the ID would only bait
+                # the model into calling Drive tools that must fail.
+                if body.attached_file_id and not body.attached_file_id.startswith("local:"):
+                    header += f"\n[drive_file_id: {body.attached_file_id}"
+                    if body.attached_mime_type:
+                        header += f" | mimeType: {body.attached_mime_type}"
+                    header += "]"
                 message_parts.append(types.Part.from_text(
-                    text=f"[Documento adjunto]\n{body.attached_context[:8000]}"
+                    text=f"{header}\n{body.attached_context[:8000]}"
                 ))
             message_parts.append(types.Part.from_text(text=body.message))
 
