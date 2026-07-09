@@ -14,7 +14,14 @@ _MAX_BATCH_TOKENS = 10000  # conservative pre-batching budget under the model's 
 
 def _init_vertexai():
     import vertexai
-    vertexai.init(project=settings.GOOGLE_CLOUD_PROJECT, location=settings.GOOGLE_CLOUD_REGION)
+    import google.auth
+    # Explicit ADC credentials are load-bearing: with GOOGLE_API_KEY set in the
+    # environment (the Gemini agents run on the AI Studio key), the vertexai SDK
+    # silently prefers API-key transport, which has no project ("project 0")
+    # and 403s on every model — embeddings and Imagen both broke this way.
+    creds, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+    vertexai.init(project=settings.GOOGLE_CLOUD_PROJECT,
+                  location=settings.GOOGLE_CLOUD_REGION, credentials=creds)
 
 
 def _estimate_tokens(text: str) -> int:

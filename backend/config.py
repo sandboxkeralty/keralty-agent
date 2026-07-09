@@ -11,7 +11,15 @@ class Settings(BaseSettings):
     GEMINI_FLASH_MODEL: str = "gemini-2.5-flash"
     GEMINI_PRO_MODEL: str = "gemini-2.5-pro"
     GEMINI_LIVE_MODEL: str = "gemini-live-2.5-flash-native-audio"
+    # Probed July 2026: only imagen-3.0-generate-001 is served on keraltysandbox
+    # (imagen-4.0-* and 3.0-002 return 404). image_tools has a fallback chain, so
+    # bumping this when newer models land is just a setting change.
     IMAGEN_MODEL: str = "imagen-3.0-generate-001"
+    IMAGEN_ASPECT_RATIO: str = "16:9"
+    # Google Slides ID of the corporate template deck (converted from
+    # branding/Template_Keralty.pptx by scripts/upload_slides_template.py).
+    # Empty = decks start from a blank default-themed presentation.
+    SLIDES_TEMPLATE_ID: str = ""
     GEMINI_TTS_MODEL: str = "gemini-2.5-flash-preview-tts"
     GEMINI_TTS_VOICE: str = "Kore"
 

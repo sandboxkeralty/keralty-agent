@@ -134,6 +134,18 @@ class DriveService:
             raise DriveReadError(f"Error reading document: {e}")
 
     @staticmethod
+    def copy_file(file_id: str, new_title: str, credentials=None) -> str:
+        """Copies a Drive file (used to instantiate the Slides template per deck)."""
+        service = get_drive_service(credentials)
+        result = service.files().copy(
+            fileId=file_id,
+            body={"name": new_title},
+            fields="id",
+            supportsAllDrives=True,
+        ).execute()
+        return result["id"]
+
+    @staticmethod
     def export_pdf(file_id: str, credentials=None) -> bytes:
         service = get_drive_service(credentials)
         try:

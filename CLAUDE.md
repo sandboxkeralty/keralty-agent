@@ -287,22 +287,26 @@ Ingestion endpoint: `POST /knowledge/documents` (50 MB limit, admin-gated). Mana
 
 `frontend/app/[locale]/email/page.tsx` calls `GET /api/email/summary?tz=...` on mount and on the "Actualizar" button.
 
-### Google Slides write operations
+### Google Slides write operations (template-driven design engine, July 2026)
 
-`services/slides.py` — real Slides batchUpdate API:
-- `add_slide_with_content(presentation_id, title, body, speaker_notes, credentials)` — creates `TITLE_AND_BODY` slide with `placeholderIdMappings`, inserts text in same batch; speaker notes in a second batch call
-- `insert_image(presentation_id, slide_id, image_url, ...)` — `createImage` with EMU coordinates
-- `get_presentation(presentation_id, credentials)` — raw API response
+**Decks are created from the corporate template.** `SLIDES_TEMPLATE_ID` (Cloud Run env var, currently `12VBQf-g_N34ac6Y_pIwLwv6_waKTkMuKYdQXgddNe5w`) points at a Google Slides conversion of `branding/Template_Keralty.pptx`, owned by the sandbox user. `SlidesService.create_presentation` copies it (`DriveService.copy_file`) and deletes its stock slides, so every new slide inherits the corporate master (fonts/colors/backgrounds); any template failure logs `TEMPLATE COPY FAILED` and falls back to a blank default-themed deck. **To swap branding later**: run `backend/scripts/upload_slides_template.py` with the new pptx (it uploads+converts, probes/classifies the layouts, and empirically tests one slide per layout on a scratch copy) and update the env var — nothing else changes.
 
-`tools/slides_tools.py`:
-- `slides_create(title, outline=None)` — creates presentation; if `outline` is a JSON array `[{title, body}]`, populates all slides in one call
-- `slides_add_slide(presentation_id, slide_title, body, speaker_notes=None)` — adds one slide
-- `slides_add_image(presentation_id, slide_id, image_url)` — inserts image
-- `slides_get(presentation_id)` — returns `{slides: [{slide_id, title}]}`
+`services/slides.py`:
+- `resolve_layouts(presentation_id)` — classifies the deck's layouts into semantic names (cover/section/content/two_column/title_only/blank) by **placeholder inventory**, not layout name (converted PPTX layouts often report CUSTOM names; the Keralty template happens to keep enum names, but don't rely on that). Resolved once per deck build.
+- `add_designed_slide(presentation_id, spec, layout_map)` — outline **schema v2**: `{layout, title, subtitle, bullets|body, columns, quote+attribution, number+caption, image_url+image_placement, speaker_notes, background_color}`. Layouts: cover, section, content, two_column, title_only, quote, big_number (the latter two are composites: BLANK/template-blank + styled TEXT_BOX shapes, 96pt bold number / 28pt italic quote), closing (renders as section). `placeholderIdMappings` are built ONLY from placeholders the resolver confirmed exist — mapping a nonexistent placeholder 400s the whole batch. Failure ladder: template layoutId → predefinedLayout → **retry without the createImage request** (a bad image URL fails the whole batch; the slide keeps its layout and just loses the image) → BLANK + text boxes (always produces a slide).
+- Image placement presets (`_PLACEMENTS`): `full_bleed`, `right_half`, `left_half`, `centered` — all exact 16:9 footprints on the 9,144,000×5,143,500 EMU canvas so a 16:9 Imagen output fills deterministically. There is deliberately no banner/strip preset: `cropProperties` is read-only in the Slides API.
+- `add_slide_with_content` / `create_slide` kept untouched for back-compat (v1 outlines).
 
-### Imagen 3 (image generation)
+`tools/slides_tools.py`: `slides_create(title, outline)` accepts schema-v2 JSON (v1 `{title, body}` entries still work — normalized to `content` specs); `slides_add_slide`'s `body` may be a JSON spec object for advanced layouts; `slides_add_image(..., placement)`; `slides_get`. VisualAgent's instruction embeds the design skill: narrative arc (cover → agenda → contenido alternando layouts → 1 slide de impacto → closing), takeaway titles ≤8 words, ≤4 bullets × ≤8 words, image-placement variety.
 
-`tools/image_tools.py` — calls `vertexai.preview.vision_models.ImageGenerationModel` with `IMAGEN_MODEL` (default `imagen-3.0-generate-001`). Uploads result bytes to GCS `keralty-agent-dev-artifacts/images/`, makes blob public (`blob.make_public()`), returns public URL. Falls back to placeholder URL on any error — this silently masked both a missing bucket and a missing `google-cloud-aiplatform` dependency for a long time; if image generation ever silently starts returning placeholders again, check those two things first before assuming a prompt/model issue.
+### Imagen (image generation)
+
+`tools/image_tools.py` — generates **16:9** (`IMAGEN_ASPECT_RATIO`) corporate images in two steps:
+1. **Prompt enrichment**: `_enrich_prompt` art-directs the agent's short subject description into a full English prompt (composition, lighting, teal/white/navy color mood, photography-or-illustration style, trailing "no text, no logos, no watermarks, no identifiable faces") via `get_genai_client()` + Flash with `thinking_budget=0`; degrades to the raw prompt on any failure.
+2. **Generation via REST `:predict` with explicit ADC OAuth — NOT the vertexai SDK.** This is load-bearing: with `GOOGLE_API_KEY` in the environment (the agents' AI Studio key), the SDK's preview vision-models path silently switches to API-key transport ("Publisher Model … not visible to the current project **0**") and 403s every model — *even when `vertexai.init` receives explicit credentials*. The embeddings path (`services/rag/embedder.py`) honors explicit credentials, so it stays on the SDK but **must** keep passing `credentials=` in `_init_vertexai` — removing it re-breaks KB search the same way (this actually happened: the API-key migration silently broke both embeddings and Imagen in production until caught).
+   Fallback chain: `IMAGEN_MODEL` → `imagen-4.0-generate-001` → `imagen-3.0-generate-002` → `imagen-3.0-generate-001`, with a `_working_model` process cache. Probed July 2026: **only `imagen-3.0-generate-001` is served on keraltysandbox** (the others 404) and it supports 16:9 (1408×768).
+
+Uploads result bytes to GCS `keralty-agent-dev-artifacts/images/`, makes blob public, returns public URL. Falls back to placeholder URL on total failure (with a full traceback + `ALL MODELS FAILED` log line) — this fallback has masked a missing bucket, a missing dependency, and the API-key transport bug; if images silently become placeholders, read the logs first.
 
 The bucket has **uniform bucket-level access disabled** specifically so `make_public()`'s legacy per-object ACL call keeps working — the bucket also holds private KB documents (`kb/` prefix) alongside public images (`images/` prefix), so making the whole bucket public via IAM instead (the usual fix for UBLA + public objects) would wrongly expose KB content. Only `image_tools.py` calls `make_public()`; KB uploads in `ingestion.py` never do, so they stay private by default. The Cloud Run backend's service account (`keralty-agent-sa@...`) has `roles/storage.objectAdmin` scoped to this one bucket, not a project-wide storage role.
 
