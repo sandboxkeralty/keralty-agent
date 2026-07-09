@@ -210,6 +210,23 @@ class FirestoreSessionService(BaseSessionService):
         except Exception as e:
             print(f"[FirestoreSessionService] delete failed: {e}")
 
+    async def update_state(
+        self, *, app_name: str, user_id: str, session_id: str, delta: dict[str, Any]
+    ) -> None:
+        """Merge a state delta into the STORED session and persist it.
+
+        Needed because get_session returns a deepcopy — mutating that copy in
+        routers (the pre-existing google_credentials `elif` does exactly this)
+        never reaches the session the Runner actually reads. Bumps
+        last_update_time so other Cloud Run instances' staleness check reloads.
+        """
+        session = self._get_or_restore(app_name, user_id, session_id)
+        if session is None:
+            return
+        session.state.update(delta)
+        session.last_update_time = time.time()
+        self._write_state(session)
+
     async def append_event(self, session: Session, event: Event) -> Event:
         event = await super().append_event(session=session, event=event)
         if event.partial:

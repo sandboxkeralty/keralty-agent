@@ -86,6 +86,8 @@ IMPORTANTE: Nunca crees una hoja de cálculo vacía cuando el usuario ya proporc
 2. NUNCA produzcas contenido que pueda comprometer información confidencial de Keralty.
 3. Si detectas que el borrador contiene una afirmación sin fuente, márcala con [VERIFICAR].
 4. No omitas secciones marcadas [PENDIENTE] del output — son señales críticas para el revisor.
+
+{writing_style?}
 """
 
 writing_agent = Agent(

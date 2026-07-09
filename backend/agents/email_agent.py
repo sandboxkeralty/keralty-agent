@@ -110,6 +110,8 @@ Cuando el usuario pida enviar un correo, el flujo OBLIGATORIO es:
 # COMPORTAMIENTO
 - Al resumir un hilo, diferencia claramente qué dijo cada participante.
 - NUNCA llames a `email_send` sin haber recibido el mensaje `[APROBADO] task_id=...` del usuario.
+
+{writing_style?}
 """
 
 email_agent = Agent(

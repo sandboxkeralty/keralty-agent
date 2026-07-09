@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import type { AnchorHTMLAttributes, ImgHTMLAttributes } from 'react';
-import { Send, Bot, User, Paperclip, X, Download, Volume2, Loader2, Cloud, HardDrive } from 'lucide-react';
+import { Send, Bot, User, Paperclip, X, Download, Volume2, Loader2, Cloud, HardDrive, PenLine, Check } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { SourceChip } from './SourceChip';
@@ -12,7 +12,8 @@ import { AttachMenu } from '../documents/AttachMenu';
 import { VoiceChat } from './VoiceChat';
 import { useTranslations, useLocale } from 'next-intl';
 import { useChatSession, ChatMessage } from '@/hooks/useChatSession';
-import { API_URL, apiFetch, getToken, clearToken, UnauthorizedError, UNAUTHORIZED_EVENT } from '@/lib/api';
+import { API_URL, apiFetch, apiJson, getToken, clearToken, UnauthorizedError, UNAUTHORIZED_EVENT } from '@/lib/api';
+import type { WritingStyle } from '@/app/[locale]/estilos/page';
 
 // Strips Markdown syntax so it isn't read aloud literally (e.g. "asterisk asterisk").
 function stripMarkdownForSpeech(text: string): string {
@@ -103,6 +104,11 @@ export function ChatWindow() {
   const [uploadError, setUploadError] = useState('');
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
   const [agentStatus, setAgentStatus] = useState<{ agent: string | null; tool: string | null } | null>(null);
+  // Writing style: null = list not loaded yet (omit style_id → backend applies
+  // the saved default); once loaded we always send an explicit id ('none' incl.)
+  const [styleData, setStyleData] = useState<{ presets: WritingStyle[]; styles: WritingStyle[]; default_style_id: string | null } | null>(null);
+  const [selectedStyleId, setSelectedStyleId] = useState<string | null>(null);
+  const [showStyleMenu, setShowStyleMenu] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -114,17 +120,19 @@ export function ChatWindow() {
   // previously the only way to dismiss the Drive picker once open was to
   // select a file, with no close button and no click-outside handling.
   useEffect(() => {
-    if (!showAttachMenu && !showPicker) return;
+    if (!showAttachMenu && !showPicker && !showStyleMenu) return;
     const handlePointerDown = (e: MouseEvent) => {
       if (attachAreaRef.current && !attachAreaRef.current.contains(e.target as Node)) {
         setShowAttachMenu(false);
         setShowPicker(false);
+        setShowStyleMenu(false);
       }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setShowAttachMenu(false);
         setShowPicker(false);
+        setShowStyleMenu(false);
       }
     };
     document.addEventListener('mousedown', handlePointerDown);
@@ -133,7 +141,24 @@ export function ChatWindow() {
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [showAttachMenu, showPicker]);
+  }, [showAttachMenu, showPicker, showStyleMenu]);
+
+  // Load the user's writing styles once; preselect their saved default.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiJson<{ presets: WritingStyle[]; styles: WritingStyle[]; default_style_id: string | null }>('/api/style');
+        if (cancelled) return;
+        setStyleData(res);
+        setSelectedStyleId(res.default_style_id ?? 'none');
+      } catch {
+        // Fetch failed: leave null → style_id omitted from requests and the
+        // backend falls back to the saved default on its own.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const stopPlayback = () => {
     audioRef.current?.pause();
@@ -327,6 +352,7 @@ export function ChatWindow() {
               mime_type: d.file.mimeType,
             })),
           } : {}),
+          ...(selectedStyleId !== null ? { style_id: selectedStyleId } : {}),
         }),
       });
 
@@ -548,6 +574,20 @@ export function ChatWindow() {
                 disabled={loading}
               />
               <div className="absolute right-2 flex items-center gap-1">
+                {styleData && (
+                  <button
+                    type="button"
+                    onClick={() => setShowStyleMenu(p => !p)}
+                    className={`p-2 rounded-full transition-colors ${selectedStyleId && selectedStyleId !== 'none' ? 'text-[var(--color-primary)] bg-[var(--color-primary-light)]' : 'text-gray-400 hover:text-[var(--color-navy)]'}`}
+                    title={
+                      selectedStyleId && selectedStyleId !== 'none'
+                        ? t('activeStyle', { name: [...styleData.presets, ...styleData.styles].find(s => s.style_id === selectedStyleId)?.name ?? '' })
+                        : t('styleTooltip')
+                    }
+                  >
+                    <PenLine size={16} />
+                  </button>
+                )}
                 <VoiceChat onTranscript={handleTranscript} />
                 <button
                   type="submit"
@@ -576,6 +616,48 @@ export function ChatWindow() {
           {showPicker && (
             <div className="absolute bottom-20 left-4 z-50 shadow-xl rounded-[12px] overflow-hidden">
               <DocumentPicker onSelect={handleSelectDoc} onClose={() => setShowPicker(false)} />
+            </div>
+          )}
+          {showStyleMenu && styleData && (
+            <div className="absolute bottom-20 right-4 z-50 shadow-xl rounded-[12px] overflow-hidden bg-white border border-[var(--color-border)] w-64 max-h-80 overflow-y-auto">
+              <button
+                type="button"
+                onClick={() => { setSelectedStyleId('none'); setShowStyleMenu(false); }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50"
+              >
+                <span className="w-4">{selectedStyleId === 'none' && <Check size={14} className="text-[var(--color-primary)]" />}</span>
+                {t('styleNone')}
+              </button>
+              <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-gray-400">{t('stylePresets')}</div>
+              {styleData.presets.map(s => (
+                <button
+                  key={s.style_id}
+                  type="button"
+                  onClick={() => { setSelectedStyleId(s.style_id); setShowStyleMenu(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50"
+                >
+                  <span className="w-4">{selectedStyleId === s.style_id && <Check size={14} className="text-[var(--color-primary)]" />}</span>
+                  <span className="truncate">{s.name}</span>
+                  {styleData.default_style_id === s.style_id && <span className="ml-auto text-[10px] text-gray-400">{t('styleDefaultTag')}</span>}
+                </button>
+              ))}
+              {styleData.styles.length > 0 && (
+                <>
+                  <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-gray-400">{t('styleMine')}</div>
+                  {styleData.styles.map(s => (
+                    <button
+                      key={s.style_id}
+                      type="button"
+                      onClick={() => { setSelectedStyleId(s.style_id); setShowStyleMenu(false); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50"
+                    >
+                      <span className="w-4">{selectedStyleId === s.style_id && <Check size={14} className="text-[var(--color-primary)]" />}</span>
+                      <span className="truncate">{s.name}</span>
+                      {styleData.default_style_id === s.style_id && <span className="ml-auto text-[10px] text-gray-400">{t('styleDefaultTag')}</span>}
+                    </button>
+                  ))}
+                </>
+              )}
             </div>
           )}
         </div>

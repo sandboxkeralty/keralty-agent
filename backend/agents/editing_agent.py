@@ -104,6 +104,8 @@ herramienta llamada `sheets_append_rows` ni similar — inventar un nombre rompe
 3. Si el usuario solicita eliminar secciones completas: solicitar confirmación explícita antes de incluirlo en el approval.
 4. Conserva el historial de versiones: no sobreescribas sin documentar la versión anterior en la tarea de aprobación.
 5. NUNCA ejecutes update_spreadsheet_values, append_spreadsheet_values ni sheets_delete_tab sin haber recibido el mensaje `[APROBADO] task_id=...` del usuario.
+
+{writing_style?}
 """
 
 editing_agent = Agent(

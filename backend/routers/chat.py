@@ -46,6 +46,9 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = "default-session"
     user_id: Optional[str] = "default-user"
     attached_files: Optional[List[AttachedFile]] = None
+    # Active writing style: absent/None → the user's saved default; the literal
+    # "none" → explicitly no style; otherwise a preset:* id or a custom style id.
+    style_id: Optional[str] = None
     # Legacy single-attachment fields — kept so an older cached frontend build
     # keeps working; normalized into attached_files in the endpoint.
     attached_context: Optional[str] = None
@@ -77,6 +80,20 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                 print(f"[chat] Firestore unavailable: {fs_err}", flush=True)
                 creds_dict = None
 
+            # Resolve the active writing style BEFORE session get/create so both
+            # paths set the same value. The key is (re)assigned on EVERY turn —
+            # to the formatted block when a style resolves, to "" otherwise —
+            # because session state persists across turns and the {writing_style?}
+            # placeholder only skips *absent* keys; a stale block from turn N
+            # would otherwise leak into turn N+1 after the user switched it off.
+            try:
+                from services.style_service import resolve_style, format_style_block
+                _style = resolve_style(body.style_id, user_id)
+                style_block = format_style_block(_style) if _style else ""
+            except Exception as style_err:
+                print(f"[chat] style resolution failed: {style_err}", flush=True)
+                style_block = ""
+
             try:
                 session = await runner.session_service.get_session(
                     app_name="agents",
@@ -84,7 +101,7 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                     user_id=user_id,
                 )
                 if session is None:
-                    init_state = {"user_id": user_id}
+                    init_state = {"user_id": user_id, "writing_style": style_block}
                     if creds_dict:
                         init_state["google_credentials"] = creds_dict
                     await runner.session_service.create_session(
@@ -120,6 +137,18 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                     session.state["attached_documents"] = [
                         a.text[:_MAX_ATTACHMENT_CHARS] for a in attachments
                     ]
+
+                # Unconditional per-turn (re)assignment — see the style comment
+                # above. Goes through update_state (not session.state[...]=):
+                # get_session returns a deepcopy, so mutating it here would
+                # never reach the session the Runner actually reads.
+                if session:
+                    await runner.session_service.update_state(
+                        app_name="agents",
+                        user_id=user_id,
+                        session_id=body.session_id,
+                        delta={"writing_style": style_block},
+                    )
             except Exception as e:
                 print(f"Session error: {e}")
 

@@ -10,7 +10,8 @@
     "email": "Executive Email",
     "admin": "Administration",
     "login": "Log in",
-    "logout": "Log out"
+    "logout": "Log out",
+    "styles": "Writing styles"
   },
   "chat": {
     "placeholder": "Type your question...",
@@ -42,7 +43,13 @@
     "statusSlides": "Working on the presentation…",
     "statusImage": "Generating the image…",
     "statusApproval": "Preparing the proposal for your approval…",
-    "errorRateLimited": "We're experiencing high demand right now and the model couldn't respond. Please wait a few seconds and try again."
+    "errorRateLimited": "We're experiencing high demand right now and the model couldn't respond. Please wait a few seconds and try again.",
+    "styleTooltip": "Writing style",
+    "activeStyle": "Active style: {name}",
+    "styleNone": "No style",
+    "stylePresets": "Presets",
+    "styleMine": "My styles",
+    "styleDefaultTag": "default"
   },
   "approval": {
     "title": "Review required",
@@ -149,5 +156,35 @@
     "networkError": "Connection error. Please check your internet connection.",
     "sessionExpired": "Your session has expired. Please log in again.",
     "permissionDenied": "You do not have permission for this action."
+  },
+  "style": {
+    "pageTitle": "Writing styles",
+    "pageSubtitle": "Personalize the tone and style the assistant uses when drafting documents, emails and edits on your behalf.",
+    "loading": "Loading styles…",
+    "defaultSection": "My default style",
+    "myStyles": "My custom styles",
+    "presetBadge": "Preset",
+    "noStyle": "No style (neutral)",
+    "setDefault": "Use as default style",
+    "isDefault": "· default",
+    "edit": "Edit",
+    "delete": "Delete",
+    "confirmDelete": "Delete this style? This cannot be undone.",
+    "createTitle": "Create a style from my documents",
+    "uploadHint": "Upload up to 5 documents you wrote (letters, notifications, reports) and the assistant will extract your writing style. Documents are not stored; they are only used for analysis.",
+    "chooseFiles": "Choose files",
+    "analyze": "Analyze my style",
+    "analyzing": "Analyzing your documents…",
+    "reviewHint": "Review and adjust the extracted style guide. Saving it approves it and makes it available in chat.",
+    "namePlaceholder": "Style name (e.g. My formal style)",
+    "descriptionPlaceholder": "Short description (optional)",
+    "save": "Save",
+    "approveSave": "Approve and save",
+    "back": "Back",
+    "cancel": "Cancel",
+    "empty": "You have no custom styles yet. Create one from your documents below.",
+    "errorAnalyze": "Could not analyze the documents. Please try again.",
+    "errorTooManyFiles": "Maximum 5 files per analysis.",
+    "errorSave": "Could not save the style."
   }
 }

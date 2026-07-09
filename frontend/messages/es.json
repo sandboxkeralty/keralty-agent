@@ -10,7 +10,8 @@
     "email": "Correo Ejecutivo",
     "admin": "Administración",
     "login": "Iniciar sesión",
-    "logout": "Cerrar sesión"
+    "logout": "Cerrar sesión",
+    "styles": "Estilos de escritura"
   },
   "chat": {
     "placeholder": "Escribe tu pregunta...",
@@ -42,7 +43,13 @@
     "statusSlides": "Trabajando en la presentación…",
     "statusImage": "Generando la imagen…",
     "statusApproval": "Preparando la propuesta para tu aprobación…",
-    "errorRateLimited": "Hay mucha demanda en este momento y el modelo no pudo responder. Espera unos segundos e inténtalo de nuevo."
+    "errorRateLimited": "Hay mucha demanda en este momento y el modelo no pudo responder. Espera unos segundos e inténtalo de nuevo.",
+    "styleTooltip": "Estilo de escritura",
+    "activeStyle": "Estilo activo: {name}",
+    "styleNone": "Sin estilo",
+    "stylePresets": "Predefinidos",
+    "styleMine": "Mis estilos",
+    "styleDefaultTag": "por defecto"
   },
   "approval": {
     "title": "Revisión requerida",
@@ -149,5 +156,35 @@
     "networkError": "Error de conexión. Por favor verifica tu conexión a internet.",
     "sessionExpired": "Tu sesión ha expirado. Inicia sesión nuevamente.",
     "permissionDenied": "No tienes permisos para esta acción."
+  },
+  "style": {
+    "pageTitle": "Estilos de escritura",
+    "pageSubtitle": "Personaliza el tono y estilo con que el asistente redacta documentos, correos y ediciones en tu nombre.",
+    "loading": "Cargando estilos…",
+    "defaultSection": "Mi estilo por defecto",
+    "myStyles": "Mis estilos personalizados",
+    "presetBadge": "Predefinido",
+    "noStyle": "Sin estilo (neutro)",
+    "setDefault": "Usar como estilo por defecto",
+    "isDefault": "· por defecto",
+    "edit": "Editar",
+    "delete": "Eliminar",
+    "confirmDelete": "¿Eliminar este estilo? Esta acción no se puede deshacer.",
+    "createTitle": "Crear estilo desde mis documentos",
+    "uploadHint": "Sube hasta 5 documentos escritos por ti (cartas, notificaciones, informes) y el asistente extraerá tu estilo de escritura. Los documentos no se guardan; solo se usan para el análisis.",
+    "chooseFiles": "Elegir archivos",
+    "analyze": "Analizar mi estilo",
+    "analyzing": "Analizando tus documentos…",
+    "reviewHint": "Revisa y ajusta la guía de estilo extraída. Al guardarla quedará aprobada y disponible en el chat.",
+    "namePlaceholder": "Nombre del estilo (ej. Mi estilo formal)",
+    "descriptionPlaceholder": "Descripción breve (opcional)",
+    "save": "Guardar",
+    "approveSave": "Aprobar y guardar",
+    "back": "Volver",
+    "cancel": "Cancelar",
+    "empty": "Aún no tienes estilos personalizados. Crea uno desde tus documentos abajo.",
+    "errorAnalyze": "No se pudo analizar los documentos. Inténtalo de nuevo.",
+    "errorTooManyFiles": "Máximo 5 archivos por análisis.",
+    "errorSave": "No se pudo guardar el estilo."
   }
 }
