@@ -41,7 +41,8 @@
     "statusSheets": "Working on the spreadsheet…",
     "statusSlides": "Working on the presentation…",
     "statusImage": "Generating the image…",
-    "statusApproval": "Preparing the proposal for your approval…"
+    "statusApproval": "Preparing the proposal for your approval…",
+    "errorRateLimited": "We're experiencing high demand right now and the model couldn't respond. Please wait a few seconds and try again."
   },
   "approval": {
     "title": "Review required",

@@ -348,6 +348,11 @@ export function ChatWindow() {
                       }
                       return m;
                    }));
+                } else if (data.type === 'rate_limited') {
+                  // Gemini quota exhausted even after backend retries: tell the
+                  // user honestly to retry shortly, not that something "broke".
+                  sawError = true;
+                  failWith(t('errorRateLimited'));
                 } else if (data.type === 'error') {
                   // Backend signals a failure mid-stream without leaking internals.
                   sawError = true;

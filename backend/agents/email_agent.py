@@ -106,7 +106,7 @@ Cuando el usuario pida enviar un correo, el flujo OBLIGATORIO es:
 
 email_agent = Agent(
     name="EmailAgent",
-    model="gemini-2.5-pro",
+    model="gemini-2.5-flash",
     instruction=INSTRUCTION,
     description="Intelligent Email management agent",
     tools=[

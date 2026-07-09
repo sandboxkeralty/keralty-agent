@@ -1,3 +1,4 @@
+import asyncio
 import json
 import uuid
 from datetime import datetime, timezone
@@ -11,6 +12,16 @@ from services.firestore import FirestoreService
 from models.schemas import SessionInDB, MessageInDB
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+_MAX_QUOTA_ATTEMPTS = 3
+
+
+def _is_quota_error(e: Exception) -> bool:
+    # Vertex 429s surface through ADK as e.g. `_ResourceExhaustedError` with
+    # "429 RESOURCE_EXHAUSTED" in the message — match on both, since the
+    # concrete exception class is private to google-genai internals.
+    s = f"{type(e).__name__} {e}"
+    return "RESOURCE_EXHAUSTED" in s or "ResourceExhausted" in s or "429" in s
 
 class ChatRequest(BaseModel):
     message: str
@@ -99,44 +110,61 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
 
             full_response = ""
             last_status = None
-            async for event in runner.run_async(
-                new_message=types.Content(role="user", parts=message_parts),
-                session_id=body.session_id,
-                user_id=user_id,
-            ):
-                # Surface which agent/tool is working so the frontend can show a
-                # meaningful "Consultando la base de conocimiento…" style label
-                # instead of a bare blinking cursor. Deduped: only emitted when
-                # the (agent, tool) pair changes.
-                author = getattr(event, "author", None)
-                tool = None
+            # Vertex quota (429 RESOURCE_EXHAUSTED) blips are frequent on this
+            # sandbox project's dynamic shared quota and usually clear within
+            # seconds — retry the turn a couple of times before surfacing an
+            # error, but only while nothing has streamed to the client yet:
+            # retrying after partial output would duplicate text in the UI.
+            # Each run_async call re-appends the user message to the session,
+            # so a retried turn leaves a duplicated user message in ADK history
+            # — an accepted tradeoff for self-healing the common case.
+            for attempt in range(1, _MAX_QUOTA_ATTEMPTS + 1):
                 try:
-                    calls = event.get_function_calls()
-                    if calls:
-                        tool = calls[0].name
-                except Exception:
-                    pass
-                if author != "user" and (author or tool) and (author, tool) != last_status:
-                    last_status = (author, tool)
-                    yield f"data: {json.dumps({'type': 'status', 'agent': author, 'tool': tool})}\n\n"
+                    async for event in runner.run_async(
+                        new_message=types.Content(role="user", parts=message_parts),
+                        session_id=body.session_id,
+                        user_id=user_id,
+                    ):
+                        # Surface which agent/tool is working so the frontend can show a
+                        # meaningful "Consultando la base de conocimiento…" style label
+                        # instead of a bare blinking cursor. Deduped: only emitted when
+                        # the (agent, tool) pair changes.
+                        author = getattr(event, "author", None)
+                        tool = None
+                        try:
+                            calls = event.get_function_calls()
+                            if calls:
+                                tool = calls[0].name
+                        except Exception:
+                            pass
+                        if author != "user" and (author or tool) and (author, tool) != last_status:
+                            last_status = (author, tool)
+                            yield f"data: {json.dumps({'type': 'status', 'agent': author, 'tool': tool})}\n\n"
 
-                if getattr(event, "content", None) is not None:
-                    text = ""
-                    if isinstance(event.content, str):
-                        text = event.content
-                    elif hasattr(event.content, "text"):
-                        text = event.content.text
-                    elif hasattr(event.content, "parts"):
-                        for p in event.content.parts:
-                            if p.text is not None:
-                                text += p.text
+                        if getattr(event, "content", None) is not None:
+                            text = ""
+                            if isinstance(event.content, str):
+                                text = event.content
+                            elif hasattr(event.content, "text"):
+                                text = event.content.text
+                            elif hasattr(event.content, "parts"):
+                                for p in event.content.parts:
+                                    if p.text is not None:
+                                        text += p.text
 
-                    if text:
-                        full_response += text
-                        yield f"data: {json.dumps({'type': 'content', 'text': text})}\n\n"
+                            if text:
+                                full_response += text
+                                yield f"data: {json.dumps({'type': 'content', 'text': text})}\n\n"
 
-                if event.is_final_response():
-                    yield f"data: {json.dumps({'type': 'final'})}\n\n"
+                        if event.is_final_response():
+                            yield f"data: {json.dumps({'type': 'final'})}\n\n"
+                    break
+                except Exception as run_err:
+                    if _is_quota_error(run_err) and not full_response and attempt < _MAX_QUOTA_ATTEMPTS:
+                        print(f"Quota 429 on attempt {attempt}, retrying in {2 * attempt}s", flush=True)
+                        await asyncio.sleep(2 * attempt)
+                        continue
+                    raise
 
             # Persist agent response
             if full_response:
@@ -155,8 +183,11 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
             # Log the real detail server-side, but never stream raw exception text
             # (Firestore/Google API errors, internal IDs, stack details) to the
             # user — that violates the "no internal details" guardrail. The frontend
-            # renders a localized message for the `error` event type.
+            # renders a localized message per event type: `rate_limited` gets an
+            # honest "high demand, retry in a few seconds" instead of the generic
+            # error that made quota blips look like broken conversations.
             print(f"Error in streaming: {type(e).__name__}: {e}", flush=True)
-            yield f"data: {json.dumps({'type': 'error'})}\n\n"
+            event_type = "rate_limited" if _is_quota_error(e) else "error"
+            yield f"data: {json.dumps({'type': event_type})}\n\n"
 
     return StreamingResponse(sse_generator(), media_type="text/event-stream")

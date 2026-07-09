@@ -106,7 +106,7 @@ Si el outline incluye slides con imagen:
 
 visual_agent = Agent(
     name="VisualAgent",
-    model="gemini-2.5-pro",
+    model="gemini-2.5-flash",
     instruction=INSTRUCTION,
     description="Creates executive Google Slides presentations with real content and images.",
     tools=[slides_create, slides_add_slide, slides_add_image, slides_get, image_generate, approval_create],

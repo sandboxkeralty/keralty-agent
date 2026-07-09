@@ -41,7 +41,8 @@
     "statusSheets": "Trabajando en la hoja de cálculo…",
     "statusSlides": "Trabajando en la presentación…",
     "statusImage": "Generando la imagen…",
-    "statusApproval": "Preparando la propuesta para tu aprobación…"
+    "statusApproval": "Preparando la propuesta para tu aprobación…",
+    "errorRateLimited": "Hay mucha demanda en este momento y el modelo no pudo responder. Espera unos segundos e inténtalo de nuevo."
   },
   "approval": {
     "title": "Revisión requerida",
