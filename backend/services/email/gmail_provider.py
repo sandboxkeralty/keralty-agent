@@ -1,4 +1,6 @@
 import base64
+import html as _html
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import List, Dict, Any, Optional
 
@@ -164,9 +166,27 @@ class GmailProvider:
         }
 
     @staticmethod
-    def create_draft(to: str, subject: str, body: str, thread_id: Optional[str] = None, credentials=None) -> str:
+    def create_draft(to: str, subject: str, body: str, thread_id: Optional[str] = None,
+                     credentials=None, signature: Optional[Dict[str, Any]] = None) -> str:
+        """Creates a Gmail draft. When `signature` (a `signatures` Firestore dict,
+        see services/signature_service.py) is provided, the draft is built as
+        multipart/alternative — plain text with the signature text appended, plus
+        an HTML part where the signature can include its logo image. Without a
+        signature the draft stays plain text, exactly as before."""
         service = get_gmail_service(credentials)
-        message = MIMEText(body)
+        if signature:
+            from services.signature_service import build_html_signature
+            plain = body.rstrip() + "\n\n" + (signature.get("content") or "")
+            html_body = _html.escape(body.rstrip()).replace("\n", "<br>")
+            html_full = (
+                f'<div>{html_body}<br><br>{build_html_signature(signature)}</div>'
+            )
+            message = MIMEMultipart("alternative")
+            # Order matters: last part is preferred by clients — HTML wins.
+            message.attach(MIMEText(plain, "plain"))
+            message.attach(MIMEText(html_full, "html"))
+        else:
+            message = MIMEText(body)
         message["to"] = to
         message["subject"] = subject
         raw = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")

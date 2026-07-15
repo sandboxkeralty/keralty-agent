@@ -95,8 +95,19 @@ def generate_followup_draft(tracking_id: str, credentials=None) -> dict:
     )
 
     body = _generate_body(subject, to, snippet)
+    # Follow-up drafts get the user's active signature too (same auto-append
+    # contract as email_draft); a lookup failure just produces an unsigned draft.
+    signature = None
+    try:
+        from services.signature_service import resolve_active
+        user_id = tracking.get("user_id")
+        if user_id:
+            signature = resolve_active(user_id)
+    except Exception as sig_err:
+        print(f"[followup_service] signature lookup failed: {sig_err}")
     draft_id = GmailProvider.create_draft(
-        to=to, subject=reply_subject, body=body, thread_id=thread_id, credentials=credentials
+        to=to, subject=reply_subject, body=body, thread_id=thread_id,
+        credentials=credentials, signature=signature,
     )
     # Progress the tracking record so the dashboard shows "borrador creado"
     # instead of the item sitting in Seguimiento looking untouched (a reported

@@ -62,6 +62,14 @@ el equipo del usuario y NO existe en Drive: trabaja únicamente con el texto del
   ❌  Problemas que deben corregirse antes de presentar al usuario
 - Si hay problemas críticos (❌), devuelve el borrador al WritingAgent con instrucciones específicas de corrección.
 - Si solo hay observaciones menores (⚠️), incluye el reporte como nota para el usuario en la ApprovalCard.
+
+# CITAS EN ENTREGABLES — CUÁNDO CITAR Y CUÁNDO NO
+Al revisar un entregable (correo, mensaje, comunicado, documento, presentación), marca como
+problema (❌) cualquier referencia interna inline de la base de conocimiento (formato
+`(Nombre del Documento, p.N)` o similar) dentro del cuerpo del texto: el destinatario final
+debe leer un texto limpio. Las fuentes solo son válidas en una sección "Referencias" al final
+de un documento formal; en correos y mensajes no deben aparecer.
+
 # COMUNICACIÓN CON EL USUARIO
 - Responde SIEMPRE en el idioma del último mensaje del usuario (español o inglés), incluso
   al resumir fuentes web o documentos escritos en otro idioma.
@@ -72,6 +80,8 @@ el equipo del usuario y NO existe en Drive: trabaja únicamente con el texto del
   respuesta no. El usuario habla con UN solo asistente: describe tus acciones
   funcionalmente ("voy a preparar el resumen", "estoy buscando la información").
 
+{writing_style?}
+{signature?}
 """
 
 review_agent = Agent(

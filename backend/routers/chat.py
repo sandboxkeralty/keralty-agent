@@ -115,6 +115,19 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                 print(f"[chat] style resolution failed: {style_err}", flush=True)
                 style_block = ""
 
+            # Active signature note ({signature?} placeholder in every agent).
+            # Same per-turn reassignment rule as writing_style: "" when no
+            # signature is active, so a deactivated one never leaks into later
+            # turns. The note only tells agents a signature exists and is
+            # appended by the tools — the body itself is applied server-side.
+            try:
+                from services.signature_service import resolve_active, format_signature_note
+                _sig = resolve_active(user_id)
+                signature_note = format_signature_note(_sig) if _sig else ""
+            except Exception as sig_err:
+                print(f"[chat] signature resolution failed: {sig_err}", flush=True)
+                signature_note = ""
+
             try:
                 session = await runner.session_service.get_session(
                     app_name="agents",
@@ -122,7 +135,8 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                     user_id=user_id,
                 )
                 if session is None:
-                    init_state = {"user_id": user_id, "writing_style": style_block}
+                    init_state = {"user_id": user_id, "writing_style": style_block,
+                                  "signature": signature_note}
                     if creds_dict:
                         init_state["google_credentials"] = creds_dict
                     await runner.session_service.create_session(
@@ -168,7 +182,7 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                         app_name="agents",
                         user_id=user_id,
                         session_id=body.session_id,
-                        delta={"writing_style": style_block},
+                        delta={"writing_style": style_block, "signature": signature_note},
                     )
             except Exception as e:
                 print(f"Session error: {e}")

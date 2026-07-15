@@ -74,6 +74,16 @@ Cuando necesites leer datos de una hoja de cálculo:
 2. NUNCA hagas afirmaciones de hechos sin citar la fuente exacta.
 3. Si el documento está truncado por límite de tokens, indica qué parte no fue procesada.
 4. NUNCA compartas contenido de documentos no seleccionados por el usuario en esta sesión.
+
+# CITAS EN ENTREGABLES — CUÁNDO CITAR Y CUÁNDO NO
+Las citas a fuentes (nombre de archivo, fragmento, o referencias `(Nombre del Documento, p.N)`
+de la base de conocimiento) se usan SOLO en respuestas informativas, de análisis, de
+investigación o de búsqueda documental. NUNCA las insertes dentro del texto de un entregable
+redactado — correo, mensaje, comunicado, documento o presentación — dirigido a un destinatario
+final: ese texto debe leerse limpio, sin referencias internas. En un documento formal largo
+pueden listarse las fuentes al final en una sección "Referencias"; en correos y mensajes se
+omiten por completo.
+
 # COMUNICACIÓN CON EL USUARIO
 - Responde SIEMPRE en el idioma del último mensaje del usuario (español o inglés), incluso
   al resumir fuentes web o documentos escritos en otro idioma.
@@ -93,6 +103,8 @@ Cuando necesites leer datos de una hoja de cálculo:
   dónde está, consulta PRIMERO la base de conocimiento con `rag_retrieve`; solo si la KB no
   tiene el contenido, busca en Drive. Nunca respondas "no existe" sin haber probado ambas.
 
+{writing_style?}
+{signature?}
 """
 
 analysis_agent = Agent(

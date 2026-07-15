@@ -47,12 +47,18 @@ async def docs_update(document_id: str, content: str, tool_context: ToolContext)
         return {"status": "error", "message": str(e)}
 
 
-async def docs_create(title: str, tool_context: ToolContext, content: Optional[str] = None) -> dict:
+async def docs_create(title: str, tool_context: ToolContext, content: Optional[str] = None,
+                      include_signature: bool = False) -> dict:
     """Creates a new Google Doc, optionally writing initial content to it.
 
     Args:
         title: The title of the new document.
         content: Optional initial content to write into the document.
+        include_signature: Set to True for documents that should be signed
+            (letters, memos, official communications) — appends the user's
+            active signature (text + logo) at the end automatically. The
+            content itself must NOT contain a signature or name/role
+            placeholders. Leave False for reports, minutes or analyses.
     """
     try:
         creds = _credentials(tool_context)
@@ -64,6 +70,20 @@ async def docs_create(title: str, tool_context: ToolContext, content: Optional[s
                 DocsService.append_text(doc_id, content, credentials=creds)
             except Exception as e:
                 print(f"[docs_create] append failed: {e}", flush=True)
+
+        if include_signature:
+            try:
+                from services.signature_service import resolve_active
+                state = getattr(tool_context, "state", {}) if tool_context else {}
+                user_id = state.get("user_id")
+                sig = resolve_active(user_id) if user_id else None
+                if sig:
+                    DocsService.append_signature(
+                        doc_id, sig.get("content", ""),
+                        logo_url=sig.get("logo_url") or None, credentials=creds,
+                    )
+            except Exception as e:
+                print(f"[docs_create] signature append failed: {e}", flush=True)
 
         # Share with the session user so the doc appears in their Drive
         user_id = getattr(getattr(tool_context, 'session', None), 'user_id', None)

@@ -41,6 +41,48 @@ class DocsService:
         ).execute()
 
     @staticmethod
+    def append_signature(document_id: str, content: str, logo_url: Optional[str] = None,
+                         credentials=None) -> bool:
+        """Appends a signature block (text + optional logo image) at the end of a Doc.
+
+        The logo must be a publicly accessible PNG/JPEG URL — the Docs API's
+        insertInlineImage fetches it server-side (signature logos live on the
+        public GCS bucket under signatures/, uploaded via /api/signatures/logo).
+        A failed image insert must not lose the text: it's a separate request in
+        the same batch order (text first), and on batch failure we retry text-only.
+        """
+        service = get_docs_service(credentials)
+
+        def _end_index() -> int:
+            doc = service.documents().get(documentId=document_id).execute()
+            body = doc.get('body', {}).get('content', [])
+            return body[-1].get('endIndex') - 1 if body else 1
+
+        text = "\n" + content.strip() + "\n"
+        requests = [{
+            'insertText': {'location': {'index': _end_index()}, 'text': text}
+        }]
+        if logo_url:
+            requests.append({
+                'insertInlineImage': {
+                    'location': {'index': _end_index() + len(text)},
+                    'uri': logo_url,
+                    'objectSize': {'height': {'magnitude': 50, 'unit': 'PT'}},
+                }
+            })
+        try:
+            service.documents().batchUpdate(
+                documentId=document_id, body={'requests': requests}).execute()
+        except Exception as e:
+            if logo_url:
+                print(f"[docs] signature logo insert failed ({e}) — retrying text-only", flush=True)
+                service.documents().batchUpdate(
+                    documentId=document_id, body={'requests': requests[:1]}).execute()
+            else:
+                raise
+        return True
+
+    @staticmethod
     def append_text(document_id: str, text: str, credentials=None) -> bool:
         service = get_docs_service(credentials)
         doc = service.documents().get(documentId=document_id).execute()

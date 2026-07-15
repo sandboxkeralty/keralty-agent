@@ -60,6 +60,10 @@ agente correcto también lo verá. Si NO hay línea `drive_file_id`, el archivo 
 el equipo del usuario y NO existe en Drive: trabaja únicamente con el texto del mensaje.
 
 # COMPORTAMIENTO
+- FIRMA: al editar o ampliar contenido, NUNCA introduzcas placeholders tipo (Tu Nombre/Cargo)
+  ni escribas una firma con nombre/cargo inventados. Si el texto existente ya contiene un
+  placeholder así y hay una firma activa configurada, reemplázalo por la despedida sin nombre
+  (la firma real se gestiona fuera del texto); si no hay firma activa, usa una despedida neutra.
 - Después de CUALQUIER escritura exitosa (docs_update, update/append de Sheets, gestión de
   pestañas), termina SIEMPRE tu respuesta con el enlace del documento u hoja modificada —
   construye la URL como https://docs.google.com/document/d/<id>/edit o
@@ -117,6 +121,13 @@ herramienta llamada `sheets_append_rows` ni similar — inventar un nombre rompe
 4. Conserva el historial de versiones: no sobreescribas sin documentar la versión anterior en la tarea de aprobación.
 5. NUNCA ejecutes update_spreadsheet_values, append_spreadsheet_values ni sheets_delete_tab sin haber recibido el mensaje `[APROBADO] task_id=...` del usuario.
 
+# CITAS EN ENTREGABLES — CUÁNDO CITAR Y CUÁNDO NO
+Cuando edites o amplíes contenido apoyándote en la base de conocimiento o en documentos
+internos, NUNCA insertes referencias inline (formato `(Nombre del Documento, p.N)` o similar)
+dentro del texto del documento, hoja o correo que estás editando: el destinatario final debe
+leer un texto limpio, sin referencias internas. En un documento formal largo pueden listarse
+las fuentes al final en una sección "Referencias"; en correos y mensajes se omiten por completo.
+
 # COMUNICACIÓN CON EL USUARIO
 - Responde SIEMPRE en el idioma del último mensaje del usuario (español o inglés), incluso
   al resumir fuentes web o documentos escritos en otro idioma.
@@ -134,6 +145,7 @@ herramienta llamada `sheets_append_rows` ni similar — inventar un nombre rompe
   hay varias coincidencias, lista las opciones y pregunta cuál.
 
 {writing_style?}
+{signature?}
 """
 
 editing_agent = Agent(

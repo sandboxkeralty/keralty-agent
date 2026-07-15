@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
-import { Users, BarChart2, ShieldCheck, Settings, Loader2, RefreshCw, BookOpen, Upload, Trash2, FileText, CheckCircle } from "lucide-react";
+import { Users, BarChart2, ShieldCheck, Settings, Loader2, RefreshCw, BookOpen, Upload, Trash2, FileText, CheckCircle, PenLine, Check, Pencil, X } from "lucide-react";
 import { apiFetch as apiRequest, apiJson, UnauthorizedError } from "@/lib/api";
 
 interface UserRecord {
@@ -44,7 +44,14 @@ interface KBDoc {
   gcs_path: string;
 }
 
-type Tab = "metrics" | "users" | "audit" | "kb" | "config";
+interface SignatureRecord {
+  signature_id: string;
+  label: string;
+  content: string;
+  logo_url?: string;
+}
+
+type Tab = "metrics" | "users" | "audit" | "kb" | "config" | "signatures";
 
 export default function AdminPage() {
   const t = useTranslations("admin");
@@ -62,6 +69,18 @@ export default function AdminPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  // Signatures tab state (per-user data — endpoints are not admin-gated)
+  const [signatures, setSignatures] = useState<SignatureRecord[]>([]);
+  const [activeSigId, setActiveSigId] = useState<string | null>(null);
+  const [sigEditingId, setSigEditingId] = useState<string | null>(null); // "new" for the create form
+  const [sigLabel, setSigLabel] = useState("");
+  const [sigContent, setSigContent] = useState("");
+  const [sigLogoUrl, setSigLogoUrl] = useState("");
+  const [sigLogoUploading, setSigLogoUploading] = useState(false);
+  const [sigSaving, setSigSaving] = useState(false);
+  const [sigError, setSigError] = useState("");
+  const sigLogoInputRef = useRef<HTMLInputElement>(null);
 
   const load = async (activeTab: Tab) => {
     setLoading(true);
@@ -82,6 +101,10 @@ export default function AdminPage() {
       } else if (activeTab === "config") {
         const data = await apiJson<{ configs?: Configs }>("/admin/configs");
         setConfigs(data.configs || {});
+      } else if (activeTab === "signatures") {
+        const data = await apiJson<{ signatures?: SignatureRecord[]; active_signature_id?: string | null }>("/api/signatures");
+        setSignatures(data.signatures || []);
+        setActiveSigId(data.active_signature_id ?? null);
       }
     } catch (e: unknown) {
       if (e instanceof UnauthorizedError) return;
@@ -136,10 +159,84 @@ export default function AdminPage() {
     }
   };
 
+  const sigStartEdit = (s: SignatureRecord | null) => {
+    setSigError("");
+    setSigEditingId(s ? s.signature_id : "new");
+    setSigLabel(s?.label || "");
+    setSigContent(s?.content || "");
+    setSigLogoUrl(s?.logo_url || "");
+  };
+
+  const handleSigLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSigLogoUploading(true);
+    setSigError("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await apiRequest("/api/signatures/logo", { method: "POST", body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || t("sigLogoError"));
+      setSigLogoUrl(data.logo_url);
+    } catch (err) {
+      if (err instanceof UnauthorizedError) return;
+      setSigError(err instanceof Error ? err.message : t("sigLogoError"));
+    } finally {
+      setSigLogoUploading(false);
+      if (sigLogoInputRef.current) sigLogoInputRef.current.value = "";
+    }
+  };
+
+  const handleSigSave = async () => {
+    if (!sigLabel.trim() || !sigContent.trim() || sigSaving) return;
+    setSigSaving(true);
+    setSigError("");
+    try {
+      const body = JSON.stringify({ label: sigLabel.trim(), content: sigContent, logo_url: sigLogoUrl });
+      if (sigEditingId === "new") {
+        await apiJson("/api/signatures", { method: "POST", headers: { "Content-Type": "application/json" }, body });
+      } else {
+        await apiJson(`/api/signatures/${sigEditingId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body });
+      }
+      setSigEditingId(null);
+      await load("signatures");
+    } catch (err) {
+      if (err instanceof UnauthorizedError) return;
+      setSigError(err instanceof Error ? err.message : t("sigError"));
+    } finally {
+      setSigSaving(false);
+    }
+  };
+
+  const handleSigDelete = async (signatureId: string) => {
+    if (!window.confirm(t("sigConfirmDelete"))) return;
+    try {
+      await apiJson(`/api/signatures/${signatureId}`, { method: "DELETE" });
+      await load("signatures");
+    } catch (err) {
+      if (!(err instanceof UnauthorizedError)) setSigError(err instanceof Error ? err.message : t("sigError"));
+    }
+  };
+
+  const handleSigSetActive = async (signatureId: string | null) => {
+    try {
+      await apiJson("/api/signatures/active", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signature_id: signatureId }),
+      });
+      setActiveSigId(signatureId);
+    } catch (err) {
+      if (!(err instanceof UnauthorizedError)) setSigError(err instanceof Error ? err.message : t("sigError"));
+    }
+  };
+
   const tabs: { id: Tab; label: string; Icon: typeof Users }[] = [
     { id: "metrics", label: t("tabMetrics"), Icon: BarChart2 },
     { id: "users", label: t("tabUsers"), Icon: Users },
     { id: "kb", label: t("tabKb"), Icon: BookOpen },
+    { id: "signatures", label: t("tabSignatures"), Icon: PenLine },
     { id: "audit", label: t("tabAudit"), Icon: ShieldCheck },
     { id: "config", label: t("tabConfig"), Icon: Settings },
   ];
@@ -391,6 +488,142 @@ export default function AdminPage() {
               </table>
             )}
           </div>
+        </div>
+      )}
+
+      {/* ── Signatures (per-user) ── */}
+      {!loading && tab === "signatures" && (
+        <div className="space-y-4 max-w-3xl">
+          <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm p-5">
+            <h3 className="font-semibold text-[var(--color-navy)] mb-1 flex items-center gap-2">
+              <PenLine size={16} /> {t("sigTitle")}
+            </h3>
+            <p className="text-xs text-[var(--color-text-muted)]">{t("sigHelp")}</p>
+          </div>
+
+          {sigError && (
+            <div className="text-red-600 text-sm bg-red-50 border border-red-200 rounded-[8px] px-4 py-2">{sigError}</div>
+          )}
+
+          {/* "No signature" option */}
+          <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm p-4 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => handleSigSetActive(null)}
+              className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 transition-colors ${activeSigId === null ? "bg-[var(--color-primary)] border-[var(--color-primary)] text-white" : "border-gray-300 hover:border-[var(--color-primary)]"}`}
+              title={t("sigSetActive")}
+            >
+              {activeSigId === null && <Check size={12} />}
+            </button>
+            <span className="text-sm text-[var(--color-text-secondary)]">{t("sigNoActive")}</span>
+          </div>
+
+          {signatures.length === 0 && (
+            <p className="text-sm text-[var(--color-text-muted)] px-1">{t("sigEmpty")}</p>
+          )}
+
+          {signatures.map((s) => (
+            <div key={s.signature_id} className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm p-4">
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => handleSigSetActive(s.signature_id)}
+                  className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 transition-colors ${activeSigId === s.signature_id ? "bg-[var(--color-primary)] border-[var(--color-primary)] text-white" : "border-gray-300 hover:border-[var(--color-primary)]"}`}
+                  title={t("sigSetActive")}
+                >
+                  {activeSigId === s.signature_id && <Check size={12} />}
+                </button>
+                <span className="font-medium text-sm text-[var(--color-navy)]">{s.label}</span>
+                {activeSigId === s.signature_id && (
+                  <span className="text-[10px] uppercase tracking-wide bg-[var(--color-primary-light)] text-[var(--color-primary)] px-2 py-0.5 rounded-full">{t("sigActive")}</span>
+                )}
+                <div className="ml-auto flex items-center gap-1">
+                  <button type="button" onClick={() => sigStartEdit(s)} className="p-1.5 text-gray-400 hover:text-[var(--color-navy)]" title={t("sigEdit")}>
+                    <Pencil size={14} />
+                  </button>
+                  <button type="button" onClick={() => handleSigDelete(s.signature_id)} className="p-1.5 text-gray-400 hover:text-red-500" title={t("sigDelete")}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+              <pre className="mt-2 ml-8 text-xs whitespace-pre-wrap text-[var(--color-text-secondary)] font-sans">{s.content}</pre>
+              {s.logo_url && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={s.logo_url} alt="" className="mt-2 ml-8 max-h-[50px]" />
+              )}
+            </div>
+          ))}
+
+          {/* Create / edit form */}
+          {sigEditingId !== null ? (
+            <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm p-5 space-y-3">
+              <h3 className="font-semibold text-[var(--color-navy)] text-sm">
+                {sigEditingId === "new" ? t("sigCreateTitle") : t("sigEdit")}
+              </h3>
+              <div>
+                <label className="text-xs text-[var(--color-text-muted)]">{t("sigLabel")}</label>
+                <input
+                  value={sigLabel}
+                  onChange={(e) => setSigLabel(e.target.value)}
+                  maxLength={60}
+                  placeholder={t("sigLabelPlaceholder")}
+                  className="mt-1 w-full text-sm border border-[var(--color-border)] rounded-[8px] px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-[var(--color-text-muted)]">{t("sigContent")}</label>
+                <textarea
+                  value={sigContent}
+                  onChange={(e) => setSigContent(e.target.value)}
+                  maxLength={1000}
+                  rows={4}
+                  placeholder={t("sigContentPlaceholder")}
+                  className="mt-1 w-full text-sm border border-[var(--color-border)] rounded-[8px] px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="text-xs text-[var(--color-text-muted)]">{t("sigLogo")}</label>
+                <div className="mt-1 flex items-center gap-3">
+                  <input ref={sigLogoInputRef} type="file" accept=".png,.jpg,.jpeg" onChange={handleSigLogoUpload} className="hidden" id="sig-logo-input" />
+                  <label htmlFor="sig-logo-input" className="inline-flex items-center gap-2 text-xs border border-[var(--color-border)] rounded-[8px] px-3 py-2 cursor-pointer hover:bg-gray-50">
+                    {sigLogoUploading ? <Loader2 size={13} className="animate-spin" /> : <Upload size={13} />}
+                    {sigLogoUploading ? t("sigUploading") : t("sigChooseLogo")}
+                  </label>
+                  {sigLogoUrl && (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={sigLogoUrl} alt="" className="max-h-[40px]" />
+                      <button type="button" onClick={() => setSigLogoUrl("")} className="p-1 text-gray-400 hover:text-red-500" title={t("sigRemoveLogo")}>
+                        <X size={14} />
+                      </button>
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleSigSave}
+                  disabled={!sigLabel.trim() || !sigContent.trim() || sigSaving || sigLogoUploading}
+                  className="inline-flex items-center gap-2 text-sm bg-[var(--color-primary)] text-white px-4 py-2 rounded-[8px] hover:bg-[var(--color-primary-dark)] disabled:opacity-50"
+                >
+                  {sigSaving ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                  {sigEditingId === "new" ? t("sigCreate") : t("sigSave")}
+                </button>
+                <button type="button" onClick={() => setSigEditingId(null)} className="text-sm px-4 py-2 rounded-[8px] border border-[var(--color-border)] hover:bg-gray-50">
+                  {t("sigCancel")}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => sigStartEdit(null)}
+              className="inline-flex items-center gap-2 text-sm bg-[var(--color-primary)] text-white px-4 py-2 rounded-[8px] hover:bg-[var(--color-primary-dark)]"
+            >
+              <PenLine size={14} /> {t("sigCreateTitle")}
+            </button>
+          )}
         </div>
       )}
 

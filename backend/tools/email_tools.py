@@ -51,12 +51,28 @@ async def email_summarize_thread(thread_id: str, tool_context: ToolContext) -> d
 
 
 async def email_draft(to: str, subject: str, body: str, tool_context: ToolContext) -> dict:
-    """Creates a draft email. Does NOT send it."""
+    """Creates a draft email. Does NOT send it.
+
+    If the user has an active signature configured, it is appended to the draft
+    automatically (text + logo, via an HTML part) — the body you pass must NOT
+    contain a signature or name/role placeholders.
+    """
     try:
+        signature = None
+        try:
+            from services.signature_service import resolve_active
+            state = getattr(tool_context, "state", {}) if tool_context else {}
+            user_id = state.get("user_id")
+            if user_id:
+                signature = resolve_active(user_id)
+        except Exception as sig_err:
+            print(f"[email_draft] signature lookup failed: {sig_err}", flush=True)
         draft_id = GmailProvider.create_draft(
-            to=to, subject=subject, body=body, credentials=_credentials(tool_context)
+            to=to, subject=subject, body=body,
+            credentials=_credentials(tool_context), signature=signature,
         )
-        return {"status": "success", "draft_id": draft_id}
+        return {"status": "success", "draft_id": draft_id,
+                "signature_applied": bool(signature)}
     except Exception as e:
         return {"status": "error", "error": str(e)}
 

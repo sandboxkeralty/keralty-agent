@@ -352,6 +352,35 @@ Executives personalize the tone/style of generated content via the "Estilos de e
 1. `session.state["writing_style"]` is **(re)assigned on every turn** — the formatted block when a style resolves (explicit `style_id`, or the user's default when absent; the literal `"none"` means no style), `""` otherwise. State persists across turns and `{writing_style?}` only skips *absent* keys, so without per-turn reassignment a deactivated style would leak into later turns. Verified live: a `"none"` turn leaves `state.writing_style == ""` in the `adk_sessions` doc.
 2. The write goes through `FirestoreSessionService.update_state()` (added for this), **not** `session.state[...] = ...` — `get_session` returns a **deepcopy**, so mutating the returned object never reaches the session the Runner reads. (The pre-existing `google_credentials` `elif` mutation has always been a no-op for the same reason; creds work because they enter via `init_state` at session creation.)
 
+### Signatures (per-executive, with logo)
+
+Custom signatures replace the model's old `[Tu Nombre/Cargo]` placeholders. Managed from the
+admin panel's **Firmas** tab (`frontend/app/[locale]/admin/page.tsx`), but the data is
+**per-user** (Firestore `signatures` collection, ownership-checked — the endpoints at
+`/api/signatures` in `routers/signatures.py` are deliberately NOT admin-gated; the tab just
+lives in the admin UI). One signature is active per user via `users/{email}.active_signature_id`
+(written with `set(..., merge=True)` — same credential-wipe trap as `default_style_id`). Logos
+upload via `POST /api/signatures/logo` to GCS `signatures/` (public, like `images/` — both Gmail
+`<img>` rendering and the Docs API's `insertInlineImage` require a public URL).
+
+**The signature is applied SERVER-SIDE, never rendered by the model** — the only way the text
+stays verbatim and the logo actually renders:
+- `GmailProvider.create_draft(..., signature=...)` builds a `multipart/alternative` draft
+  (plain text + HTML with the logo) when a signature dict is passed; plain `MIMEText` otherwise.
+  Both callers resolve and pass it: `email_tools.email_draft` (from `state["user_id"]`) and
+  `followup_service.generate_followup_draft` (from the tracking record's `user_id`).
+- `docs_create` gained `include_signature: bool = False` → `DocsService.append_signature`
+  (insertText + `insertInlineImage`, ~50pt height; retries text-only if the image insert fails).
+  The agent sets it true for letters/memos/communications only.
+
+Prompt side: `services/signature_service.py::format_signature_note` is injected per turn as
+`session.state["signature"]` (`routers/chat.py`, same unconditional per-turn reassignment as
+`writing_style`) into a `{signature?}` placeholder present in **all 9 agents** — it only tells
+the model a signature exists and is auto-appended, so it must never write its own signature,
+closing name/cargo, or bracket placeholders. Email/Writing/Editing agents also carry a static
+FIRMA rule banning `[Tu Nombre/Cargo]`-style placeholders even when no signature is configured.
+The brace-token pre-flight scan's allowed set is now `{writing_style?}` **and** `{signature?}`.
+
 ### Attaching documents in chat (Drive + local upload)
 
 Paperclip button in `ChatWindow.tsx` opens `<AttachMenu>` (`components/documents/AttachMenu.tsx`), a small two-row menu: "Upload from device" and "Google Drive." Both sources converge on the same `attachedDocs: { file: DriveFile; text: string }[]` state (**up to 5 files per message, mixing both sources**; `appendAttachment` dedupes by file id and surfaces a localized `documents.tooManyFiles` error past the cap) — a locally uploaded file is wrapped in a synthetic `DriveFile`-shaped object (`id: "local:<uuid>"`). The chips are individually removable and carry a **source-distinct icon** (lucide `Cloud` = Google Drive, `HardDrive` = device upload) — the `local:` id prefix is what distinguishes the two everywhere.
