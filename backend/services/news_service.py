@@ -98,6 +98,19 @@ def _clean_html(text: str, limit: int = 400) -> str:
     return text[:limit]
 
 
+def _is_recent(published_at: str) -> bool:
+    """True when the item is within NEWS_MAX_AGE_HOURS. Items without a parseable
+    date are excluded — every source provides dates, and undated entries are
+    typically pinned/stale (e.g. EITB kept a 2025 promo item at the feed top)."""
+    if not published_at:
+        return False
+    try:
+        age = datetime.now(timezone.utc) - datetime.fromisoformat(published_at)
+        return age.total_seconds() <= settings.NEWS_MAX_AGE_HOURS * 3600
+    except Exception:
+        return False
+
+
 def _fetch_source(source: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Fetches one source's items, trying candidate URLs in order.
 
@@ -122,7 +135,10 @@ def _fetch_source(source: Dict[str, Any]) -> List[Dict[str, Any]]:
                 last_err = RuntimeError(f"no entries at {url}")
                 continue
             items = []
-            for e in entries[:settings.NEWS_MAX_ITEMS_PER_SOURCE]:
+            saw_valid_but_old = False
+            for e in entries:
+                if len(items) >= settings.NEWS_MAX_ITEMS_PER_SOURCE:
+                    break
                 link = e.get("link") or ""
                 title = _clean_html(e.get("title") or "", 200)
                 if not link or not title:
@@ -131,6 +147,9 @@ def _fetch_source(source: Dict[str, Any]) -> List[Dict[str, Any]]:
                 tp = e.get("published_parsed") or e.get("updated_parsed")
                 if tp:
                     published = datetime(*tp[:6], tzinfo=timezone.utc).isoformat()
+                if not _is_recent(published):
+                    saw_valid_but_old = True
+                    continue
                 image_url = ""
                 for m in (e.get("media_content") or []) + (e.get("media_thumbnail") or []):
                     if m.get("url"):
@@ -154,6 +173,11 @@ def _fetch_source(source: Dict[str, Any]) -> List[Dict[str, Any]]:
                 })
             if items:
                 return items
+            if saw_valid_but_old:
+                # The feed works — there simply is no news in the window.
+                # Not a failure: return empty rather than triggering the
+                # stale-fallback/warning path.
+                return []
             last_err = RuntimeError(f"entries without usable title/link at {url}")
         except Exception as e:
             last_err = e
@@ -232,6 +256,9 @@ def get_news(force_refresh: bool = False) -> Dict[str, Any]:
             age_h = (datetime.now(timezone.utc)
                      - datetime.fromisoformat(cached["generated_at"])).total_seconds() / 3600
             if age_h < settings.NEWS_CACHE_TTL_HOURS:
+                # Re-apply the age window at serving time: cached items keep
+                # aging between refreshes and must drop out at the 24h mark.
+                cached["items"] = [i for i in cached["items"] if _is_recent(i.get("published_at", ""))]
                 return cached
         except Exception:
             pass
@@ -267,6 +294,8 @@ def get_news(force_refresh: bool = False) -> Dict[str, Any]:
 
     all_items: List[dict] = []
     for its in fresh_by_source.values():
+        # Stale-fallback items age too — enforce the window on everything.
+        its = [i for i in its if _is_recent(i.get("published_at", ""))]
         its.sort(key=lambda x: x.get("published_at") or "", reverse=True)
         all_items.extend(its)
     for it in all_items:

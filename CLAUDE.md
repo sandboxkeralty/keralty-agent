@@ -324,7 +324,10 @@ scraping** (probed live, July 2026):
 - El País: `https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/portada` — **TRAP: the
   legacy `elpais.com/rss/elpais/portada.xml` responds 200 but is frozen at 2020**; never use it.
 - El Mundo: `https://e00-elmundo.uecdn.es/elmundo/rss/portada.xml` (CDN, reliable).
-- EITB: `https://www.eitb.eus/es/rss/noticias/` (descriptions carry HTML — stripped).
+- EITB: `https://www.eitb.eus/es/rss/noticias/` (descriptions carry HTML — stripped). **Frozen
+  since 2025-06-18**: EITB moved its news to orain.eus, which publishes NO RSS (probed: no
+  feed link tags, all conventional paths 404) — so EITB currently contributes 0 items under
+  the 24h window. Kept configured so it auto-recovers if they restore a feed.
 - Vocento (Diario Vasco `diariovasco.com/rss/2.0/portada`, El Correo
   `elcorreo.com/rss/2.0/portada`, El Correo Álava `?section=alava`): real RSS, but their bot
   protection **intermittently serves an HTML wall instead of XML**, and their XML breaks
@@ -332,9 +335,12 @@ scraping** (probed live, July 2026):
   User-Agent on our own urllib fetch, candidate-URL lists per source, and per-source failure
   isolation.
 
-"Daily" = a **global** Firestore cache doc (`news_cache/latest`, shared across users) with
-`NEWS_CACHE_TTL_HOURS` (4) — refreshed on page load / the Actualizar button; there is no Cloud
-Scheduler in this project. A failed source keeps its previous cached items (stale fallback)
+**Only items from the last `NEWS_MAX_AGE_HOURS` (24) are shown** — enforced at fetch time, at
+cache-serve time, and on stale-fallback items (they age out too); undated entries are excluded
+(they're typically pinned/stale). A feed that works but has nothing in the window returns
+empty WITHOUT triggering the failure warning. "Daily" = a **global** Firestore cache doc
+(`news_cache/latest`, shared across users) with `NEWS_CACHE_TTL_HOURS` (4) — refreshed on page
+load / the Actualizar button; there is no Cloud Scheduler in this project. A failed source keeps its previous cached items (stale fallback)
 and lands in `warnings`, which the frontend shows as an orange banner (same honest-failure
 pattern as the email dashboard). Summaries: one batched Gemini Flash call for NEW items only
 (deduped by link hash against the cache; `thinking_budget=0` mandatory), falling back to the

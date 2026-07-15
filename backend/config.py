@@ -70,6 +70,7 @@ class Settings(BaseSettings):
 
     NEWS_CACHE_TTL_HOURS: int = 4
     NEWS_MAX_ITEMS_PER_SOURCE: int = 10
+    NEWS_MAX_AGE_HOURS: int = 24
 
     KB_AGENT_ENABLED: bool = True
     KB_RAG_CORPUS_ID: str = "keralty-kb-corpus-prod"
