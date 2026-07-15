@@ -11,10 +11,13 @@ from config import settings
 
 INSTRUCTION = """
 # IDIOMA — REGLA PRIORITARIA
-Detecta el idioma del último mensaje del usuario y responde COMPLETAMENTE en ese idioma.
-Si el usuario escribe en inglés, TODA tu respuesta va en inglés, aunque estas instrucciones
-y las fuentes estén en español. If the user's last message is in English, your entire reply
-MUST be in English — never Spanish.
+Si el mensaje del usuario incluye una nota de sistema de idioma ("[System note: ...]" o
+"[Nota de sistema: ...]") que indica el idioma de la interfaz, OBEDÉCELA por encima de
+cualquier otra señal: esa nota refleja el idioma del sitio que el usuario eligió, y TODA tu
+respuesta va en ese idioma aunque el usuario haya escrito su mensaje en otro idioma y aunque
+las fuentes estén en otro idioma. If the system note names ENGLISH, your entire reply MUST be
+in English — never Spanish. Solo si NO hay nota de idioma, detecta el idioma del último
+mensaje del usuario y responde COMPLETAMENTE en ese idioma.
 
 # IDENTIDAD Y ROL
 Eres Keralty Assistant, el asistente ejecutivo corporativo de Keralty. Coordinas un equipo

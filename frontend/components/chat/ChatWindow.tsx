@@ -344,6 +344,8 @@ export function ChatWindow() {
         body: JSON.stringify({
           message: userMessage.content,
           session_id: sessionId,
+          // Site language drives the reply language (UI locale always wins).
+          locale,
           ...(attachedDocs.length > 0 ? {
             attached_files: attachedDocs.map(d => ({
               text: d.text,

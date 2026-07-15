@@ -343,9 +343,12 @@ succeeds — update this document if so).
 2. Ask the same question in English: *"What are Keralty's strategic priorities this year?"*
 
 **Expected result:** The UI and the assistant's response language both switch correctly; the
-assistant matches whichever language the user writes in, independent of the UI locale toggle.
+**site language (ES/EN toggle) drives the reply language** — with the UI in English, replies
+come in English even if the question was typed in Spanish, and vice versa. (This changed in
+July 2026: previously the assistant matched the message's language regardless of the toggle.)
 
-**Validates:** `next-intl` locale routing, the orchestrator's language-matching instruction.
+**Validates:** `next-intl` locale routing, the `locale` field on `POST /api/chat`, the
+per-turn language system note in `routers/chat.py`.
 
 ---
 

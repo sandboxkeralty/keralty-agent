@@ -66,6 +66,10 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = "default-session"
     user_id: Optional[str] = "default-user"
+    # UI locale ("es" | "en") — the site language ALWAYS drives the reply
+    # language when present; absent only on older cached frontend builds,
+    # which fall back to the _is_english message sniff.
+    locale: Optional[str] = None
     attached_files: Optional[List[AttachedFile]] = None
     # Active writing style: absent/None → the user's saved default; the literal
     # "none" → explicitly no style; otherwise a preset:* id or a custom style id.
@@ -223,7 +227,25 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                     text=f"{header}\n{att.text[:_MAX_ATTACHMENT_CHARS]}"
                 ))
             message_parts.append(types.Part.from_text(text=body.message))
-            if _is_english(body.message):
+            # Reply-language note. The UI locale always wins when the frontend
+            # sends it (the deterministic note is the mechanism that actually
+            # controls reply language — prompt rules alone demonstrably don't).
+            # The _is_english sniff survives only as the fallback for older
+            # cached frontend builds that don't send `locale` yet.
+            locale = (body.locale or "").lower()
+            if locale == "en":
+                message_parts.append(types.Part.from_text(
+                    text="[System note: the user's interface language is ENGLISH — "
+                         "your entire reply must be in English, regardless of the "
+                         "language of the user's message or of any sources.]"
+                ))
+            elif locale == "es":
+                message_parts.append(types.Part.from_text(
+                    text="[Nota de sistema: el idioma de la interfaz del usuario es "
+                         "ESPAÑOL — toda tu respuesta debe ir en español, sin importar "
+                         "el idioma del mensaje del usuario ni de las fuentes.]"
+                ))
+            elif _is_english(body.message):
                 message_parts.append(types.Part.from_text(
                     text="[System note: the user's message above is in ENGLISH — "
                          "your entire reply must be in English.]"
