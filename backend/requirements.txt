@@ -31,3 +31,6 @@ python-docx==1.2.0
 rank-bm25==0.2.2
 numpy==2.4.6
 openpyxl==3.1.5
+# Image attachment compression (chat multimodal input) — keeps persisted ADK
+# events under Firestore's 1 MB doc limit
+Pillow==11.3.0

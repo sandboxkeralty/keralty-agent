@@ -1,4 +1,6 @@
 import asyncio
+import base64
+import io
 import json
 import random
 import uuid
@@ -22,6 +24,38 @@ _QUOTA_BACKOFF = [2, 5, 10]
 
 _MAX_ATTACHED_FILES = 5
 _MAX_ATTACHMENT_CHARS = 8000
+# Image attachments: hard caps chosen around Firestore's 1 MB limit on the
+# persisted ADK event doc (the user-message Event serializes inline image
+# bytes as base64 inside event_json). 3 images × ≤200 KB compressed ≈ 800 KB
+# encoded — safe; anything looser silently breaks conversation-history
+# persistence for that turn.
+_MAX_IMAGES_PER_MESSAGE = 3
+_MAX_IMAGE_INPUT_BYTES = 10 * 1024 * 1024
+_IMAGE_TARGET_BYTES = 200 * 1024
+
+
+def _compress_image(data: bytes) -> bytes:
+    """Downscales/re-encodes an image to JPEG ≤ _IMAGE_TARGET_BYTES.
+
+    Steps down (1024px/q75 → 800/q65 → 640/q60) until under budget; returns
+    the last attempt regardless so a stubborn image still goes through
+    (slightly over budget beats dropping the attachment).
+    """
+    from PIL import Image
+
+    img = Image.open(io.BytesIO(data))
+    if img.mode not in ("RGB", "L"):
+        img = img.convert("RGB")
+    out = b""
+    for max_dim, quality in ((1024, 75), (800, 65), (640, 60)):
+        im = img.copy()
+        im.thumbnail((max_dim, max_dim))
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=quality)
+        out = buf.getvalue()
+        if len(out) <= _IMAGE_TARGET_BYTES:
+            break
+    return out
 
 _EN_WORDS = (" the ", " what ", " can ", " you ", " how ", " please ", " is ", " are ",
              " of ", " to ", " my ", " me ", " about ", " with ")
@@ -53,13 +87,16 @@ def _is_quota_error(e: Exception) -> bool:
     return "RESOURCE_EXHAUSTED" in s or "ResourceExhausted" in s or "429" in s
 
 class AttachedFile(BaseModel):
-    text: str
+    text: str = ""
     # Drive metadata, when the file came from Drive: lets agents operate on the
     # real file (Docs/Sheets/Slides tools) instead of only its extracted text.
     # Local uploads send a synthetic "local:<uuid>" id.
     file_id: Optional[str] = None
     file_name: Optional[str] = None
     mime_type: Optional[str] = None
+    # Image attachment: base64 (raw or data-URL) — becomes a real inline image
+    # part the multimodal model can see. Compressed server-side (_compress_image).
+    image_base64: Optional[str] = None
 
 
 class ChatRequest(BaseModel):
@@ -173,8 +210,11 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                 # the model actually reads), so session state doesn't need history.
                 attachments = body.normalized_attachments()
                 if attachments and session:
+                    # Text attachments only — image bytes must never land in
+                    # session state (serialized to Firestore on every event).
                     session.state["attached_documents"] = [
-                        a.text[:_MAX_ATTACHMENT_CHARS] for a in attachments
+                        a.text[:_MAX_ATTACHMENT_CHARS]
+                        for a in attachments if a.text and not a.image_base64
                     ]
 
                 # Unconditional per-turn (re)assignment — see the style comment
@@ -208,7 +248,31 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
             # only, nothing reads it back out, so without this the model never sees
             # what the user attached.
             message_parts = []
+            image_count = 0
             for att in body.normalized_attachments():
+                if att.image_base64:
+                    if image_count >= _MAX_IMAGES_PER_MESSAGE:
+                        continue
+                    try:
+                        b64 = att.image_base64
+                        if "," in b64[:80] and b64.lstrip().startswith("data:"):
+                            b64 = b64.split(",", 1)[1]  # strip data-URL prefix
+                        raw = base64.b64decode(b64)
+                        if len(raw) > _MAX_IMAGE_INPUT_BYTES:
+                            raise ValueError("image exceeds 10 MB")
+                        jpeg = _compress_image(raw)
+                    except Exception as img_err:
+                        print(f"[chat] image attachment skipped: {img_err}", flush=True)
+                        continue
+                    name = att.file_name or "imagen"
+                    message_parts.append(types.Part.from_text(
+                        text=f"[Imagen adjunta: {name}]"
+                    ))
+                    message_parts.append(types.Part.from_bytes(
+                        data=jpeg, mime_type="image/jpeg"
+                    ))
+                    image_count += 1
+                    continue
                 header = "[Documento adjunto"
                 if att.file_name:
                     header += f": {att.file_name}"

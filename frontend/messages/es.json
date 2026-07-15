@@ -71,7 +71,11 @@
     "close": "Cerrar",
     "searchButton": "Buscar",
     "noDocuments": "No se encontraron documentos",
-    "tooManyFiles": "Máximo 5 archivos adjuntos por mensaje."
+    "tooManyFiles": "Máximo 5 archivos adjuntos por mensaje.",
+    "dropHint": "Suelta el archivo aquí para adjuntarlo",
+    "tooManyImages": "Máximo 3 imágenes por mensaje.",
+    "imageTooLarge": "La imagen supera el límite de 10 MB.",
+    "myDrive": "Mi unidad"
   },
   "sidebar": {
     "today": "Hoy",

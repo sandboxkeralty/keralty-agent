@@ -32,21 +32,43 @@ def _creds_from_request(request: Request):
 
 
 @router.get("/")
-def list_documents(request: Request, q: str = Query(None), limit: int = 10):
+def list_documents(request: Request, q: str = Query(None), limit: int = 10,
+                   folder_id: str = Query(None)):
     creds = _creds_from_request(request)
-    files = DriveService.list_documents(query=q, limit=limit, credentials=creds)
+    files = DriveService.list_documents(query=q, limit=limit, credentials=creds,
+                                        folder_id=folder_id)
     return {"files": files}
 
 @router.get("/{file_id}/text")
 def read_document_text(file_id: str, request: Request):
-    """Returns the text content of a Drive document for context injection."""
+    """Returns the text content of a Drive document for context injection.
+
+    For image files it returns {image_base64, mime_type} instead — the chat
+    sends those as real inline image parts the multimodal model can see.
+    """
     creds = _creds_from_request(request)
     try:
+        from services.drive import get_drive_service, IMAGE_MIME_TYPES
+        service = get_drive_service(creds)
+        meta = service.files().get(fileId=file_id, fields="mimeType, size").execute()
+        mime = meta.get("mimeType", "")
+        if mime in IMAGE_MIME_TYPES:
+            import base64
+            size = int(meta.get("size") or 0)
+            if size > 10 * 1024 * 1024:
+                raise HTTPException(status_code=413, detail="Image exceeds 10 MB limit.")
+            data = service.files().get_media(fileId=file_id).execute()
+            return {"file_id": file_id, "mime_type": mime,
+                    "image_base64": base64.b64encode(data).decode("ascii")}
         text = DriveService.read_document_text(file_id, credentials=creds)
+    except HTTPException:
+        raise
     except DriveReadError as e:
         # Surface a real error instead of letting the error message be attached
         # to the chat as if it were the document's content.
         raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Could not read file: {e}")
     if not text:
         raise HTTPException(status_code=404, detail="Document not found or unreadable")
     return {"file_id": file_id, "text": text}

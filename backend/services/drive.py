@@ -21,7 +21,14 @@ _DEFAULT_MIME_TYPES = [
     'text/plain',
     'text/csv',
     'text/markdown',
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+    'image/gif',
 ]
+
+_FOLDER_MIME = 'application/vnd.google-apps.folder'
+IMAGE_MIME_TYPES = {'image/png', 'image/jpeg', 'image/webp', 'image/gif'}
 _MIME_TYPE_ALIASES = {
     'document': ['application/vnd.google-apps.document'],
     'presentation': ['application/vnd.google-apps.presentation'],
@@ -69,22 +76,38 @@ def _escape_drive_query(value: str) -> str:
 class DriveService:
     @staticmethod
     def list_documents(query: str = None, limit: int = 10, credentials=None,
-                        mime_types: List[str] = None) -> List[Dict[str, Any]]:
+                        mime_types: List[str] = None,
+                        folder_id: str = None) -> List[Dict[str, Any]]:
+        """Lists Drive files. Two modes:
+
+        - Search / flat recency (default, `folder_id` None): existing behavior —
+          global mimeType-filtered list, optional name filter, newest first.
+        - Browse (`folder_id` set, e.g. "root"): the given folder's children —
+          subfolders INCLUDED (so a picker can navigate) plus matching files,
+          folders sorted first. A name `query` always wins over browse mode
+          (search is global, matching the picker's search-box semantics).
+        """
         service = get_drive_service(credentials)
         types = mime_types if mime_types else _DEFAULT_MIME_TYPES
         resolved = []
         for t in types:
             resolved.extend(_MIME_TYPE_ALIASES.get(t, [t]))
         mime_clause = " or ".join(f"mimeType='{t}'" for t in resolved)
-        q = f"({mime_clause})"
+        order_by = "modifiedTime desc"
         if query:
-            q += f" and name contains '{_escape_drive_query(query)}'"
+            q = f"({mime_clause}) and name contains '{_escape_drive_query(query)}'"
+        elif folder_id:
+            q = (f"'{_escape_drive_query(folder_id)}' in parents and "
+                 f"(mimeType='{_FOLDER_MIME}' or {mime_clause}) and trashed=false")
+            order_by = "folder,modifiedTime desc"
+        else:
+            q = f"({mime_clause})"
 
         results = service.files().list(
             q=q,
             pageSize=limit,
             fields="nextPageToken, files(id, name, mimeType, webViewLink, iconLink)",
-            orderBy="modifiedTime desc"
+            orderBy=order_by
         ).execute()
 
         return results.get('files', [])

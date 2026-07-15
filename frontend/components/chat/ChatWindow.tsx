@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import type { AnchorHTMLAttributes, ImgHTMLAttributes } from 'react';
-import { Send, Bot, User, Paperclip, X, Download, Volume2, Loader2, Cloud, HardDrive, PenLine, Check } from 'lucide-react';
+import { Send, Bot, User, Paperclip, X, Download, Volume2, Loader2, Cloud, HardDrive, PenLine, Check, Image as ImageIcon, UploadCloud } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { SourceChip } from './SourceChip';
@@ -99,9 +99,11 @@ export function ChatWindow() {
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
-  const [attachedDocs, setAttachedDocs] = useState<{ file: DriveFile; text: string }[]>([]);
+  const [attachedDocs, setAttachedDocs] = useState<{ file: DriveFile; text: string; imageBase64?: string }[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
+  const dragDepthRef = useRef(0);
   const [playingMessageId, setPlayingMessageId] = useState<string | null>(null);
   const [agentStatus, setAgentStatus] = useState<{ agent: string | null; tool: string | null } | null>(null);
   // Writing style: null = list not loaded yet (omit style_id → backend applies
@@ -239,38 +241,46 @@ export function ChatWindow() {
   };
 
   const MAX_ATTACHED_FILES = 5;
+  const MAX_IMAGES = 3;
+  const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+  const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'];
 
-  const appendAttachment = (doc: { file: DriveFile; text: string }): boolean => {
+  const appendAttachment = (doc: { file: DriveFile; text: string; imageBase64?: string }): boolean => {
     let ok = true;
+    let err = '';
     setAttachedDocs(prev => {
       if (prev.some(d => d.file.id === doc.file.id)) return prev;
-      if (prev.length >= MAX_ATTACHED_FILES) { ok = false; return prev; }
+      if (prev.length >= MAX_ATTACHED_FILES) { ok = false; err = td('tooManyFiles'); return prev; }
+      if (doc.imageBase64 && prev.filter(d => d.imageBase64).length >= MAX_IMAGES) {
+        ok = false; err = td('tooManyImages'); return prev;
+      }
       return [...prev, doc];
     });
-    if (!ok) setUploadError(td('tooManyFiles'));
+    if (!ok) setUploadError(err);
     return ok;
   };
 
-  const handleSelectDoc = async (file: DriveFile) => {
-    setShowPicker(false);
+  // One helper for every local-file entry point (paperclip input + drag & drop).
+  // Images stay client-side (read as base64 → real image part for the model);
+  // documents go through /documents/upload for text extraction.
+  const uploadLocalFile = async (file: File) => {
     setUploadError('');
-    try {
-      const res = await apiFetch(`/documents/${file.id}/text`);
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.detail || td('uploadFailed'));
-      appendAttachment({ file, text: data.text });
-    } catch (e) {
-      if (e instanceof UnauthorizedError) return;
-      setUploadError(e instanceof Error ? e.message : String(e));
+    if (IMAGE_TYPES.includes(file.type)) {
+      if (file.size > MAX_IMAGE_BYTES) { setUploadError(td('imageTooLarge')); return; }
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => reject(new Error('read failed'));
+        reader.readAsDataURL(file);
+      });
+      appendAttachment({
+        file: { id: `local:${crypto.randomUUID()}`, name: file.name, mimeType: file.type },
+        text: '',
+        imageBase64: dataUrl,
+      });
+      return;
     }
-  };
-
-  const handleLocalUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    setShowAttachMenu(false);
-    if (!file) return;
     setUploading(true);
-    setUploadError('');
     try {
       const form = new FormData();
       form.append('file', file);
@@ -286,8 +296,44 @@ export function ChatWindow() {
       setUploadError(err instanceof Error ? err.message : String(err));
     } finally {
       setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
     }
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    dragDepthRef.current = 0;
+    setIsDragging(false);
+    const files = Array.from(e.dataTransfer.files || []);
+    for (const f of files.slice(0, MAX_ATTACHED_FILES)) {
+      await uploadLocalFile(f);
+    }
+  };
+
+  const handleSelectDoc = async (file: DriveFile) => {
+    setShowPicker(false);
+    setUploadError('');
+    try {
+      const res = await apiFetch(`/documents/${file.id}/text`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || td('uploadFailed'));
+      if (data.image_base64) {
+        // Drive image: attach as a real image the model can see.
+        appendAttachment({ file, text: '', imageBase64: data.image_base64 });
+      } else {
+        appendAttachment({ file, text: data.text });
+      }
+    } catch (e) {
+      if (e instanceof UnauthorizedError) return;
+      setUploadError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  const handleLocalUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    setShowAttachMenu(false);
+    if (!file) return;
+    await uploadLocalFile(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const handleTranscript = (text: string) => {
@@ -352,6 +398,7 @@ export function ChatWindow() {
               file_id: d.file.id,
               file_name: d.file.name,
               mime_type: d.file.mimeType,
+              ...(d.imageBase64 ? { image_base64: d.imageBase64 } : {}),
             })),
           } : {}),
           ...(selectedStyleId !== null ? { style_id: selectedStyleId } : {}),
@@ -466,7 +513,31 @@ export function ChatWindow() {
   };
 
   return (
-    <div className="relative flex flex-col h-full bg-[var(--color-background)] rounded-lg shadow-sm border border-[var(--color-border)]">
+    <div
+      className="relative flex flex-col h-full bg-[var(--color-background)] rounded-lg shadow-sm border border-[var(--color-border)]"
+      onDragEnter={(e) => {
+        if (!e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        dragDepthRef.current += 1;
+        setIsDragging(true);
+      }}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes('Files')) e.preventDefault();
+      }}
+      onDragLeave={() => {
+        dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+        if (dragDepthRef.current === 0) setIsDragging(false);
+      }}
+      onDrop={handleDrop}
+    >
+      {isDragging && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center rounded-lg border-2 border-dashed border-[var(--color-primary)] bg-[var(--color-primary-light)]/70 pointer-events-none">
+          <div className="flex flex-col items-center gap-2 text-[var(--color-navy)]">
+            <UploadCloud size={32} className="text-[var(--color-primary)]" />
+            <span className="text-sm font-medium">{td('dropHint')}</span>
+          </div>
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
         {messages.map(m => (
           <div key={m.id} className={`flex gap-3 max-w-[80%] ${m.role === 'user' ? 'ml-auto flex-row-reverse' : ''}`}>
@@ -535,8 +606,8 @@ export function ChatWindow() {
           <div className="flex items-center flex-wrap gap-2 mb-2 px-1">
             {attachedDocs.map(doc => (
               <span key={doc.file.id} className="flex items-center gap-1.5 text-xs bg-[var(--color-primary-light)] text-[var(--color-navy)] px-2 py-1 rounded-full border border-[var(--color-primary)]/30">
-                {/* Source-distinct icon: HardDrive = uploaded from device, Cloud = Google Drive */}
-                {doc.file.id.startsWith('local:') ? <HardDrive size={11} /> : <Cloud size={11} />}
+                {/* Source-distinct icon: image, device upload, or Google Drive */}
+                {doc.imageBase64 ? <ImageIcon size={11} /> : doc.file.id.startsWith('local:') ? <HardDrive size={11} /> : <Cloud size={11} />}
                 {doc.file.name}
                 <button type="button" onClick={() => setAttachedDocs(prev => prev.filter(d => d.file.id !== doc.file.id))} className="ml-1 hover:text-red-500">
                   <X size={11} />
@@ -563,7 +634,7 @@ export function ChatWindow() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept=".pdf,.docx,.doc,.txt,.csv,.md"
+                accept=".pdf,.docx,.doc,.txt,.csv,.md,.png,.jpg,.jpeg,.webp"
                 onChange={handleLocalUpload}
                 className="hidden"
               />

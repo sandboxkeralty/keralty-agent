@@ -71,7 +71,11 @@
     "close": "Close",
     "searchButton": "Search",
     "noDocuments": "No documents found",
-    "tooManyFiles": "Maximum 5 attached files per message."
+    "tooManyFiles": "Maximum 5 attached files per message.",
+    "dropHint": "Drop the file here to attach it",
+    "tooManyImages": "Maximum 3 images per message.",
+    "imageTooLarge": "The image exceeds the 10 MB limit.",
+    "myDrive": "My Drive"
   },
   "sidebar": {
     "today": "Today",
