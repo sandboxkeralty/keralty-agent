@@ -136,7 +136,7 @@
     "sigLabel": "Nombre de la firma",
     "sigLabelPlaceholder": "p. ej. Firma ejecutiva",
     "sigContent": "Contenido (nombre, cargo, teléfono…)",
-    "sigContentPlaceholder": "Fernando Martínez\nCEO — Keralty\n+57 300 000 0000",
+    "sigContentPlaceholder": "Daniel Sandoval\nCEO — Keralty\n+57 300 000 0000",
     "sigLogo": "Logo (PNG/JPG, máx. 2 MB)",
     "sigChooseLogo": "Elegir logo",
     "sigRemoveLogo": "Quitar logo",
