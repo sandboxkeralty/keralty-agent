@@ -11,7 +11,8 @@
     "admin": "Administración",
     "login": "Iniciar sesión",
     "logout": "Cerrar sesión",
-    "styles": "Estilos de escritura"
+    "styles": "Estilos de escritura",
+    "news": "Noticias"
   },
   "chat": {
     "placeholder": "Escribe tu pregunta...",
@@ -218,5 +219,17 @@
     "errorAnalyze": "No se pudo analizar los documentos. Inténtalo de nuevo.",
     "errorTooManyFiles": "Máximo 5 archivos por análisis.",
     "errorSave": "No se pudo guardar el estilo."
+  },
+  "news": {
+    "title": "Noticias",
+    "updated": "Actualizado",
+    "refresh": "Actualizar",
+    "loading": "Cargando noticias…",
+    "empty": "No hay noticias disponibles en este momento.",
+    "regionAll": "Todas",
+    "regionBasque": "País Vasco",
+    "regionSpain": "España",
+    "readAt": "Leer en {source}",
+    "sourceWarning": "No se pudieron actualizar algunas fuentes ({sources}); se muestran sus últimas noticias conocidas."
   }
 }

@@ -314,6 +314,36 @@ Uploads result bytes to GCS `keralty-agent-dev-artifacts/images/`, makes blob pu
 
 The bucket has **uniform bucket-level access disabled** specifically so `make_public()`'s legacy per-object ACL call keeps working — the bucket also holds private KB documents (`kb/` prefix) alongside public images (`images/` prefix), so making the whole bucket public via IAM instead (the usual fix for UBLA + public objects) would wrongly expose KB content. Only `image_tools.py` calls `make_public()`; KB uploads in `ingestion.py` never do, so they stay private by default. The Cloud Run backend's service account (`keralty-agent-sa@...`) has `roles/storage.objectAdmin` scoped to this one bucket, not a project-wide storage role.
 
+### News page ("Noticias", July 2026)
+
+Executive news aggregation at `frontend/app/[locale]/news/page.tsx` (Sidebar link below
+Email). Backend: `services/news_service.py` + `routers/news.py` (`GET /api/news`,
+`POST /api/news/refresh`, auth-covered). **All six sources use their official RSS — no
+scraping** (probed live, July 2026):
+
+- El País: `https://feeds.elpais.com/mrss-s/pages/ep/site/elpais.com/portada` — **TRAP: the
+  legacy `elpais.com/rss/elpais/portada.xml` responds 200 but is frozen at 2020**; never use it.
+- El Mundo: `https://e00-elmundo.uecdn.es/elmundo/rss/portada.xml` (CDN, reliable).
+- EITB: `https://www.eitb.eus/es/rss/noticias/` (descriptions carry HTML — stripped).
+- Vocento (Diario Vasco `diariovasco.com/rss/2.0/portada`, El Correo
+  `elcorreo.com/rss/2.0/portada`, El Correo Álava `?section=alava`): real RSS, but their bot
+  protection **intermittently serves an HTML wall instead of XML**, and their XML breaks
+  Python's strict ElementTree — hence `feedparser` (pinned in requirements), a browser-like
+  User-Agent on our own urllib fetch, candidate-URL lists per source, and per-source failure
+  isolation.
+
+"Daily" = a **global** Firestore cache doc (`news_cache/latest`, shared across users) with
+`NEWS_CACHE_TTL_HOURS` (4) — refreshed on page load / the Actualizar button; there is no Cloud
+Scheduler in this project. A failed source keeps its previous cached items (stale fallback)
+and lands in `warnings`, which the frontend shows as an orange banner (same honest-failure
+pattern as the email dashboard). Summaries: one batched Gemini Flash call for NEW items only
+(deduped by link hash against the cache; `thinking_budget=0` mandatory), falling back to the
+cleaned RSS description — a Gemini failure never blanks the page. Summaries are generated in
+Spanish regardless of UI locale (the sources are Spanish-language). Article thumbnails come
+from the papers' CDNs, whose hosts are allowlisted in `next.config.ts`'s CSP `img-src`
+(`media.eitb.eus`, `*.epimg.net`, `imagenes.elpais.com`, `*.uecdn.es`, `*.ppllstatics.com`) —
+without that, every thumbnail is CSP-blocked.
+
 ### Session persistence & history
 
 `backend/services/adk_session_service.py` (FirestoreSessionService) — ADK `BaseSessionService` backed by Firestore `adk_sessions` collection. **Both state AND events survive cold starts.** Events (the conversation history the model actually reads) were originally in-memory only, on the assumption that the `messages` collection covered history — but `messages` only feeds the history sidebar and is never fed back to the model, so every cold start, **redeploy**, or scale-out to a second Cloud Run instance silently wiped the model's conversational memory mid-conversation (user-visible as "no tengo memoria de la instrucción anterior" right after an error or deploy). Events now persist to an `events` subcollection under each `adk_sessions` doc — one doc per event (`event_json` = the Pydantic-serialized ADK `Event`), so the parent doc's 1 MB limit is never in play — and are reloaded in timestamp order on restore. Three subtleties encoded there: (1) `_get_or_restore` compares the Firestore doc's `last_update_time` against the in-memory copy and reloads when Firestore is newer, so two concurrent Cloud Run instances don't serve each other stale history; (2) one undecodable event (ADK schema drift across upgrades) is skipped, not allowed to discard the whole history; (3) `delete_session` explicitly deletes the subcollection docs — Firestore does *not* cascade-delete subcollections, and orphaned events would resurrect into a reused session id.

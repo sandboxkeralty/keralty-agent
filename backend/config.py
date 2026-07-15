@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     EMAIL_MAX_THREADS: int = 50
     EMAIL_DIGEST_ENABLED: bool = True
 
+    NEWS_CACHE_TTL_HOURS: int = 4
+    NEWS_MAX_ITEMS_PER_SOURCE: int = 10
+
     KB_AGENT_ENABLED: bool = True
     KB_RAG_CORPUS_ID: str = "keralty-kb-corpus-prod"
     KB_INDEX_ENDPOINT: Optional[str] = None

@@ -34,3 +34,5 @@ openpyxl==3.1.5
 # Image attachment compression (chat multimodal input) — keeps persisted ADK
 # events under Firestore's 1 MB doc limit
 Pillow==11.3.0
+# Executive news page: tolerant RSS parsing (Vocento feeds break strict ET)
+feedparser==6.0.11

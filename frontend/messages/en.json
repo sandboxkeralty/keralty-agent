@@ -11,7 +11,8 @@
     "admin": "Administration",
     "login": "Log in",
     "logout": "Log out",
-    "styles": "Writing styles"
+    "styles": "Writing styles",
+    "news": "News"
   },
   "chat": {
     "placeholder": "Type your question...",
@@ -218,5 +219,17 @@
     "errorAnalyze": "Could not analyze the documents. Please try again.",
     "errorTooManyFiles": "Maximum 5 files per analysis.",
     "errorSave": "Could not save the style."
+  },
+  "news": {
+    "title": "News",
+    "updated": "Updated",
+    "refresh": "Refresh",
+    "loading": "Loading news…",
+    "empty": "No news available right now.",
+    "regionAll": "All",
+    "regionBasque": "Basque Country",
+    "regionSpain": "Spain",
+    "readAt": "Read at {source}",
+    "sourceWarning": "Some sources could not be updated ({sources}); showing their last known items."
   }
 }

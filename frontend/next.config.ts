@@ -10,11 +10,17 @@ const WS_ORIGIN = API_ORIGIN.replace(/^http/, "ws");
 
 // Hosts that legitimately serve images rendered in chat / avatars:
 // Drive file icons, Google user pictures, and GCS-hosted generated images.
+// Plus the news page's article thumbnails (fixed newspaper CDNs).
 const IMG_HOSTS = [
   "https://drive-thirdparty.googleusercontent.com",
   "https://*.googleusercontent.com",
   "https://lh3.googleusercontent.com",
   "https://storage.googleapis.com",
+  "https://media.eitb.eus",
+  "https://*.epimg.net",
+  "https://imagenes.elpais.com",
+  "https://*.uecdn.es",
+  "https://*.ppllstatics.com",
 ];
 
 // The chat renders model-generated Markdown and remote images, so the token in

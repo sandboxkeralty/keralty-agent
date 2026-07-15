@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { MessageSquare, Settings, Mail, Plus, Trash2, Loader2, PenLine } from "lucide-react";
+import { MessageSquare, Settings, Mail, Plus, Trash2, Loader2, PenLine, Newspaper } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { useChatSession, ChatMessage } from "@/hooks/useChatSession";
 import { apiFetch, UnauthorizedError } from "@/lib/api";
@@ -134,6 +134,10 @@ export function Sidebar() {
         <Link href="/email" className="flex items-center gap-3 rounded-[8px] px-3 py-2 text-sm font-medium hover:bg-[var(--color-navy-dark)]">
           <Mail className="h-4 w-4" />
           {tNav("email")}
+        </Link>
+        <Link href="/news" className="flex items-center gap-3 rounded-[8px] px-3 py-2 text-sm font-medium hover:bg-[var(--color-navy-dark)]">
+          <Newspaper className="h-4 w-4" />
+          {tNav("news")}
         </Link>
         <Link href="/estilos" className="flex items-center gap-3 rounded-[8px] px-3 py-2 text-sm font-medium hover:bg-[var(--color-navy-dark)]">
           <PenLine className="h-4 w-4" />
