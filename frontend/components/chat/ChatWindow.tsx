@@ -93,7 +93,7 @@ export function ChatWindow() {
   const t = useTranslations('chat');
   const td = useTranslations('documents');
   const locale = useLocale();
-  const { sessionId, messages, setMessages, bumpHistoryRefresh } = useChatSession();
+  const { sessionId, messages, setMessages, pendingFolderId, bumpHistoryRefresh } = useChatSession();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
@@ -392,6 +392,8 @@ export function ChatWindow() {
           session_id: sessionId,
           // Site language drives the reply language (UI locale always wins).
           locale,
+          // Folder for a NEW conversation (backend only uses it at session creation).
+          ...(pendingFolderId ? { folder_id: pendingFolderId } : {}),
           ...(attachedDocs.length > 0 ? {
             attached_files: attachedDocs.map(d => ({
               text: d.text,

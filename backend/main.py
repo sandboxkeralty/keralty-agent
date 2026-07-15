@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from auth.auth_middleware import auth_middleware
-from routers import auth, documents, voice, history, admin, knowledge, chat, tasks, email, tts, style, signatures, news
+from routers import auth, documents, voice, history, admin, knowledge, chat, tasks, email, tts, style, signatures, news, folders
 from config import settings
 from observability.tracing import setup_tracing
 
@@ -28,6 +28,8 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(documents.router)
 app.include_router(voice.router)
+# folders BEFORE history: the fixed /history/folders path must win over /history/{session_id}
+app.include_router(folders.router)
 app.include_router(history.router)
 app.include_router(admin.router)
 app.include_router(knowledge.router)

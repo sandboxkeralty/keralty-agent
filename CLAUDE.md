@@ -356,10 +356,27 @@ without that, every thumbnail is CSP-blocked.
 
 `routers/chat.py` persists every user message and agent response to Firestore `messages` collection after each turn.
 
+**Chat folders (July 2026, ChatGPT-Projects style):** per-user Firestore collection
+`chat_folders` (`services/folder_service.py`, ownership-checked like styles/signatures) +
+nullable `sessions.folder_id`. `routers/folders.py` (prefix `/history/folders`) is registered
+**BEFORE** `history.router` in `main.py` — required so the fixed path wins over
+`/history/{session_id}`. Grouping is client-side (no new composite index; the only server
+query is a two-equality-filter `sessions_in_folder`). New conversations land in a folder via
+`ChatRequest.folder_id` (used only at session creation; `useChatSession.pendingFolderId`
+carries it from the sidebar's per-folder "+" button). Folder deletion offers both semantics
+(`?delete_chats=false` moves members to unfiled; `true` purges them).
+
 `routers/history.py`:
-- `GET /history/` — all sessions for the authenticated user, with message count and 120-char preview
+- `GET /history/` — all sessions for the authenticated user, with `folder_id`, message count and 120-char preview
 - `GET /history/{session_id}` — full message thread (ownership-checked)
-- `DELETE /history/{session_id}` — deletes session (messages retained for audit)
+- `PATCH /history/{session_id}/folder` — move a chat between folders (both ownerships checked)
+- `DELETE /history/{session_id}` — **full purge** (July 2026, user-approved change): session
+  doc + ALL its `messages` docs (`FirestoreService.purge_session_data`, batched) + the ADK
+  memory via `runner.session_service.delete_session` (adk_sessions doc + events subcollection).
+  Previously messages/ADK were retained and silently accumulated forever.
+- `DELETE /history/` (optional `?folder_id=`) — bulk purge of all (or one folder's)
+  conversations; logs a `chats_bulk_delete` audit event. `audit_events` are NEVER touched by
+  any chat deletion — deleting chats doesn't erase the write-audit trail.
 
 **Frontend architecture (Claude.ai/ChatGPT-style, not a separate history page)**: there is no `/history` route in the frontend anymore — it was removed once the sidebar covered everything it did. `frontend/hooks/useChatSession.tsx` (`ChatSessionProvider`/`useChatSession`) holds `sessionId` and `messages` in React context, provided once at the `AppShell` level (`components/layout/AppShell.tsx`) so it persists across route navigation instead of living as local state inside `ChatWindow`. `components/layout/Sidebar.tsx` fetches `GET /history/`, groups sessions by recency (Hoy/Ayer/Últimos 7 días/Anteriores), and on click fetches `GET /history/{id}` and calls the context's `loadSession(id, messages)` — switching conversations updates the same mounted `ChatWindow` instantly, with no page reload. "Nueva conversación" calls `startNewConversation()`, which generates a fresh `session_id` — **`sessionStorage`'s `keralty_session` key persists per browser tab, so anything that doesn't explicitly call `startNewConversation()` will keep silently reusing the same session** (this was a real, shipped bug before the redesign: the old sidebar link just navigated to `/` without clearing it).
 

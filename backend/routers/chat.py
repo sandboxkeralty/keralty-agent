@@ -107,6 +107,9 @@ class ChatRequest(BaseModel):
     # language when present; absent only on older cached frontend builds,
     # which fall back to the _is_english message sniff.
     locale: Optional[str] = None
+    # Chat folder for NEW conversations (used only at session creation;
+    # ownership-validated, invalid ids silently become "no folder").
+    folder_id: Optional[str] = None
     attached_files: Optional[List[AttachedFile]] = None
     # Active writing style: absent/None → the user's saved default; the literal
     # "none" → explicitly no style; otherwise a preset:* id or a custom style id.
@@ -188,11 +191,17 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                     )
                     # Persist session metadata to Firestore for history page
                     try:
+                        folder_id = None
+                        if body.folder_id:
+                            from services.folder_service import get_folder
+                            if get_folder(body.folder_id, user_id):
+                                folder_id = body.folder_id
                         now = datetime.now(timezone.utc)
                         FirestoreService.create_session(SessionInDB(
                             session_id=body.session_id,
                             user_id=user_id,
                             title=body.message[:80],
+                            folder_id=folder_id,
                             created_at=now,
                             updated_at=now,
                         ))

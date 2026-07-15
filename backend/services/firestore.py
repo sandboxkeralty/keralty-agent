@@ -50,6 +50,37 @@ class FirestoreService:
         return [MessageInDB(**doc.to_dict()) for doc in docs]
 
     @staticmethod
+    def set_session_folder(session_id: str, folder_id: Optional[str]):
+        db.collection("sessions").document(session_id).update({"folder_id": folder_id})
+
+    @staticmethod
+    def purge_session_data(session_id: str) -> int:
+        """Deletes the session doc and ALL its messages (real purge, batched).
+
+        Does NOT touch audit_events (deleting a chat never erases the audit
+        trail) and does not handle the ADK session — callers pair this with
+        runner.session_service.delete_session, which removes the adk_sessions
+        doc and its events subcollection.
+        """
+        deleted = 0
+        while True:
+            docs = list(
+                db.collection("messages")
+                .where("session_id", "==", session_id)
+                .limit(400)
+                .stream()
+            )
+            if not docs:
+                break
+            batch = db.batch()
+            for doc in docs:
+                batch.delete(doc.reference)
+            batch.commit()
+            deleted += len(docs)
+        db.collection("sessions").document(session_id).delete()
+        return deleted
+
+    @staticmethod
     def log_audit_event(event: AuditEvent):
         db.collection("audit_events").document(event.event_id).set(event.model_dump())
 
