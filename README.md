@@ -16,13 +16,19 @@ Deployed on Google Cloud Run in the `keraltysandbox` GCP project (`us-central1`)
 ## What it does
 
 - **Chats like Claude.ai / ChatGPT** — a persistent sidebar with grouped conversation history
-  (Hoy / Ayer / Últimos 7 días), instant switching between conversations, and a working "new
-  conversation" that actually resets state. Conversation memory survives restarts, redeploys
-  and scale-out (ADK events persist to Firestore), and a live status label shows what the
-  assistant is doing ("Consultando la base de conocimiento…") instead of a blinking cursor.
-- **Writes in each executive's personal style** — predefined styles plus custom ones
-  distilled from the executive's own sample documents (reviewed and approved by them before
-  use), selectable per conversation from the chat composer.
+  (Hoy / Ayer / Últimos 7 días), **chat folders** (create/rename/delete, move chats, start a
+  conversation inside a folder — ChatGPT-Projects style), instant switching between
+  conversations, a working "new conversation" that actually resets state, and **bulk delete**
+  with real purge (messages and model memory are actually removed; the write-audit trail never
+  is). Conversation memory survives restarts, redeploys and scale-out (ADK events persist to
+  Firestore), and a live status label shows what the assistant is doing ("Consultando la base
+  de conocimiento…") instead of a blinking cursor. The site language toggle (ES/EN) drives the
+  reply language deterministically.
+- **Writes in each executive's personal style — and signs with their signature** — predefined
+  styles plus custom ones distilled from the executive's own sample documents (reviewed and
+  approved by them before use), selectable per conversation from the chat composer. Per-user
+  signatures (with logo) are managed in the admin panel and appended server-side to emails and
+  signed documents — no more `[Tu Nombre/Cargo]` placeholders.
 - **Designs real presentations** — every deck starts from the corporate template, uses a
   layout engine (cover, sections, two columns, big-number and quote slides, hero slides with
   full-bleed 16:9 art-directed images) and a narrative-arc design system, behind the same
@@ -30,12 +36,22 @@ Deployed on Google Cloud Run in the `keraltysandbox` GCP project (`us-central1`)
 - **Reads and writes Google Workspace** — creates and edits Docs, Sheets (including uploaded
   `.xlsx`/`.xls` files, not just native Google Sheets — and full tab management: add, rename,
   delete with approval), and Slides, always behind an explicit approval step before anything
-  destructive is written. Chat attachments (up to 5, from Drive or the device) carry their
-  Drive file ID so agents can work on the file itself, not just its text.
+  destructive is written. Chat attachments (up to 5, from Drive or the device — **including
+  drag & drop onto the chat**) carry their Drive file ID so agents can work on the file
+  itself, not just its text. The Drive picker navigates real folders with breadcrumbs.
+- **Understands images** — attach photos, screenshots or diagrams (PNG/JPEG/WebP, from the
+  device or Drive) and the assistant sees them natively: describe, extract text/data, answer
+  questions. Images are auto-compressed server-side so conversation memory persistence never
+  breaks.
+- **Daily executive news ("Noticias")** — aggregates Basque and Spanish press (Diario Vasco,
+  EITB, El Correo, El Correo Álava, El País, El Mundo) via their official RSS, with AI
+  summaries, region/source filters, and one-click open in a new tab.
 - **Searches and reasons over a corporate Knowledge Base** — a hybrid BM25 + dense-embedding
   retrieval pipeline with Gemini reranking and an abstention gate, so the assistant says "I
   don't know" instead of guessing.
-- **Manages email** — reads, triages, drafts, and sends via Gmail (approval-gated sends). The
+- **Manages email** — reads, triages, drafts (two length variants, the executive picks one
+  before anything is drafted or approved), and sends via Gmail (approval-gated sends, signed
+  with the active signature). The
   executive email dashboard shows AI-derived priority (not just Gmail's generic flags) on
   today's inbox, honestly reports when a fetch fails instead of showing false zeros, and
   generates a real, topic-aware follow-up draft — shown inline — with one click. "Today" is
