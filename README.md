@@ -29,10 +29,23 @@ Deployed on Google Cloud Run in the `keraltysandbox` GCP project (`us-central1`)
   approved by them before use), selectable per conversation from the chat composer. Per-user
   signatures (with logo) are managed in the admin panel and appended server-side to emails and
   signed documents — no more `[Tu Nombre/Cargo]` placeholders.
-- **Designs real presentations** — every deck starts from the corporate template, uses a
-  layout engine (cover, sections, two columns, big-number and quote slides, hero slides with
+- **Designs real presentations, on brand** — every deck starts from one of the three official
+  corporate templates (Keralty, Presidencia Corporativo, Presidencia Estándar — the agent
+  picks from the request wording, an explicit mention wins), re-themed with the brand manual's
+  palette, with the authorized Keralty logo placed automatically on cover/closing slides
+  (white variant over dark/hero backgrounds, blue over white, per the manual's rules). Layout
+  engine (cover, sections, two columns, big-number and quote slides, hero slides with
   full-bleed 16:9 art-directed images) and a narrative-arc design system, behind the same
   outline-approval flow.
+- **Follows the corporate brand manual everywhere** — a single brand module distills the
+  67-page Manual Keralty (Pantone palette, logo usage, typography, tone) into the slides
+  engine, generated Docs (on-request logo header), image art direction, and the email digest.
+- **Lets each executive choose the AI model per conversation** — a picker in the chat
+  composer (like ChatGPT/claude.ai) offers Gemini (default), Claude (Fable, Opus, Sonnet,
+  Haiku) and OpenAI (Sol, Terra, Luna, GPT 5.5); switching mid-conversation keeps the full
+  history, and models only appear when their API key is configured (keys held in Secret
+  Manager). Web search stays on Gemini (its grounding tool is Gemini-exclusive); when an
+  OpenAI model is selected, image generation uses OpenAI's images API instead of Imagen.
 - **Reads and writes Google Workspace** — creates and edits Docs, Sheets (including uploaded
   `.xlsx`/`.xls` files, not just native Google Sheets — and full tab management: add, rename,
   delete with approval), and Slides, always behind an explicit approval step before anything
@@ -66,7 +79,8 @@ Deployed on Google Cloud Run in the `keraltysandbox` GCP project (`us-central1`)
 - **Voice input, and spoken replies on demand** — speak a request via the Gemini Live API, and
   click any reply to hear it read aloud with Gemini's own multilingual text-to-speech (not the
   browser's built-in voices, which are inconsistent and often mispronounce Spanish).
-- **Generates images** — Imagen 3, downloadable directly from the chat.
+- **Generates images** — Imagen (or OpenAI images when an OpenAI chat model is selected),
+  art-directed with the brand palette, downloadable directly from the chat.
 - **Researches the web and internal documents together** — one agent that combines Google
   Search grounding with internal Drive search in a single response.
 - **Gives admins visibility** — a panel for platform metrics, user management, Knowledge Base
@@ -113,7 +127,7 @@ flowchart TB
     subgraph Google["Google Cloud & Workspace"]
         direction LR
         Workspace["Drive · Docs · Sheets<br/>Slides · Gmail"]
-        VertexAI["Vertex AI<br/>Gemini · Imagen 3<br/>Live API · TTS"]
+        VertexAI["Vertex AI<br/>Gemini · Imagen<br/>Live API · TTS"]
         Firestore[("Firestore<br/>sessions · messages · tasks<br/>users · writing_styles · audit_events")]
         GCS[("Cloud Storage<br/>images/ · kb/")]
     end
@@ -171,7 +185,7 @@ attachment — cannot trigger a send or write.
 | Agent orchestration | Google Agent Development Kit (ADK), Gemini rolling aliases (`gemini-flash-latest` / `gemini-pro-latest`) |
 | Backend | FastAPI, Python 3.11, Uvicorn |
 | Frontend | Next.js 15 (App Router, Turbopack), TypeScript, Tailwind CSS v4 |
-| AI models | Gemini (flash/pro rolling aliases via AI Studio key), Gemini Live API + Imagen 3 + text-embedding-005 (Vertex AI), Gemini TTS |
+| AI models | Gemini (default; flash/pro rolling aliases), user-selectable Claude (Fable/Opus/Sonnet/Haiku) and OpenAI (Sol/Terra/Luna/GPT 5.5) via ADK LiteLLM; Gemini Live API + Imagen + text-embedding-005 (Vertex AI), Gemini TTS, OpenAI images |
 | Retrieval | rank-bm25 (sparse) + Vertex AI embeddings (dense), Reciprocal Rank Fusion |
 | Data | Firestore (sessions, messages, tasks, KB chunks, audit log), Cloud Storage |
 | Auth | Google OAuth 2.0 (PKCE) + JWT (python-jose) |
@@ -265,7 +279,8 @@ frontend/
 backend/scripts/   One-off ops scripts (Slides template upload + layout probe)
 
 docs/              Product roadmap and use-case test scripts
-branding/          Official Keralty brand assets (palette, logo, template)
+branding/          Official Keralty brand assets (manual de marca PDF, palette, authorized
+                   logos, Clan Pro fonts, 3 pptx templates + re-themed copies in generated/)
 ```
 
 ---
