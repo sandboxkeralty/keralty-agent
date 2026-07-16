@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 
 from google.adk.tools import ToolContext
 
-from config import settings
 from services.email.gmail_provider import GmailProvider
 from tools._auth import _credentials
 from tools._approval import _require_approval
@@ -108,34 +107,30 @@ async def email_send(draft_id: str, tool_context: ToolContext) -> dict:
 
 
 async def email_track(message_id: str, tool_context: ToolContext) -> dict:
-    """Tracks a sent message for follow-up after EMAIL_TRACKING_FOLLOWUP_DAYS days."""
+    """Tracks a sent message for follow-up after the user's follow-up window."""
     try:
-        from services.firestore import FirestoreService, db
+        from services.email import thread_store
         state = getattr(tool_context, "state", {}) if tool_context else {}
         user_id = state.get("user_id") or "unknown"
-        now = datetime.now(timezone.utc)
-        tracking_id = str(uuid.uuid4())
-        deadline = now + timedelta(days=settings.EMAIL_TRACKING_FOLLOWUP_DAYS)
+        # Per-executive follow-up window (falls back to the global default).
+        followup_days = thread_store.get_email_settings(user_id)["followup_days"]
+        deadline = datetime.now(timezone.utc) + timedelta(days=followup_days)
 
-        # Capture descriptive info (subject/recipient) at tracking time so the
-        # follow-up dashboard never has to show the raw Gmail message_id.
-        subject, to = "", ""
+        # Capture descriptive info (subject/recipient/thread) at tracking time
+        # so the dashboard never shows a raw Gmail message_id, and the v2 scan
+        # can link this record to its thread state without extra lookups.
+        subject, to, thread_id = "", "", ""
         try:
             headers = GmailProvider.get_message_headers(message_id, credentials=_credentials(tool_context))
             subject, to = headers.get("subject", ""), headers.get("to", "")
+            thread_id = headers.get("thread_id", "")
         except Exception as header_err:
             print(f"[email_track] header lookup failed: {header_err}")
 
-        db.collection("email_tracking").document(tracking_id).set({
-            "tracking_id": tracking_id,
-            "message_id": message_id,
-            "user_id": user_id,
-            "subject": subject,
-            "to": to,
-            "deadline": deadline,
-            "status": "waiting",
-            "created_at": now,
-        })
+        tracking_id = thread_store.create_tracking(
+            user_id=user_id, message_id=message_id, thread_id=thread_id,
+            subject=subject, to=to, deadline=deadline,
+        )
         return {"status": "success", "tracking_id": tracking_id, "tracking": True}
     except Exception as e:
         return {"status": "error", "error": str(e)}
@@ -144,13 +139,10 @@ async def email_track(message_id: str, tool_context: ToolContext) -> dict:
 async def email_get_tracking(tool_context: ToolContext) -> dict:
     """Returns emails being tracked for follow-up that are still awaiting a reply."""
     try:
-        from services.firestore import db
+        from services.email import thread_store
         state = getattr(tool_context, "state", {}) if tool_context else {}
         user_id = state.get("user_id") or "unknown"
-        docs = db.collection("email_tracking").where(
-            "user_id", "==", user_id
-        ).where("status", "in", ["waiting", "followup_drafted"]).stream()
-        tracked = [{"tracking_id": doc.id, **doc.to_dict()} for doc in docs]
+        tracked = thread_store.get_tracked(user_id, ["waiting", "followup_drafted"])
         return {"status": "success", "tracked_emails": tracked}
     except Exception as e:
         return {"status": "error", "error": str(e)}

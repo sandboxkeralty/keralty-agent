@@ -3,7 +3,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from fastapi import APIRouter, HTTPException, Request
 from auth.google_oauth import credentials_from_dict, credentials_to_dict
-from services.firestore import FirestoreService, db
+from services.firestore import FirestoreService
 from services.email.gmail_provider import GmailProvider
 from services.email.followup_service import generate_followup_draft
 from services.email.triage_service import classify_priority
@@ -105,10 +105,8 @@ def get_email_summary(request: Request, tz: Optional[str] = None):
     try:
         # "in" keeps drafted follow-ups visible (with a status badge) instead of
         # vanishing from Seguimiento the moment their draft is generated.
-        tracked_docs = db.collection("email_tracking").where(
-            "user_id", "==", user_id
-        ).where("status", "in", ["waiting", "followup_drafted"]).stream()
-        tracked = [{"tracking_id": doc.id, **doc.to_dict()} for doc in tracked_docs]
+        from services.email import thread_store
+        tracked = thread_store.get_tracked(user_id, ["waiting", "followup_drafted"])
         for t in tracked:
             if "deadline" in t and hasattr(t["deadline"], "isoformat"):
                 t["deadline"] = t["deadline"].isoformat()

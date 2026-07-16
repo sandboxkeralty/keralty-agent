@@ -68,6 +68,17 @@ class Settings(BaseSettings):
     EMAIL_MAX_THREADS: int = 50
     EMAIL_DIGEST_ENABLED: bool = True
 
+    # Correo Ejecutivo v2 — incremental scan over a rolling window.
+    EMAIL_SCAN_WINDOW_DAYS: int = 7        # default; per-user override on users doc (clamped 3-14)
+    EMAIL_SCAN_MAX_THREADS: int = 150      # hard cap per scan (inbox + sent combined)
+    EMAIL_ANALYSIS_BATCH_SIZE: int = 15    # threads per Gemini analysis call
+    EMAIL_SCAN_COOLDOWN_SECONDS: int = 60  # double-open guard: serve stored state within this window
+
+    # Phase 3 — machine-invoked endpoints (/hooks/*). Empty SA email disables them (404).
+    GMAIL_PUSH_TOPIC: str = "projects/keraltysandbox/topics/gmail-notifications"
+    HOOKS_OIDC_SERVICE_ACCOUNT: str = ""
+    HOOKS_OIDC_AUDIENCE: str = ""
+
     NEWS_CACHE_TTL_HOURS: int = 4
     NEWS_MAX_ITEMS_PER_SOURCE: int = 10
     NEWS_MAX_AGE_HOURS: int = 24

@@ -7,7 +7,7 @@ both callers, so it lives here once instead of being duplicated.
 """
 
 from config import settings
-from services.firestore import db
+from services.email import thread_store
 from services.email.gmail_provider import GmailProvider
 from services.genai_client import get_genai_client
 
@@ -69,10 +69,9 @@ def generate_followup_draft(tracking_id: str, credentials=None) -> dict:
 
     Raises ValueError if the tracking record doesn't exist.
     """
-    doc = db.collection("email_tracking").document(tracking_id).get()
-    if not doc.exists:
+    tracking = thread_store.get_tracking(tracking_id)
+    if not tracking:
         raise ValueError(f"Tracking record {tracking_id} not found")
-    tracking = doc.to_dict()
     message_id = tracking.get("message_id")
 
     to = tracking.get("to", "")
@@ -115,7 +114,7 @@ def generate_followup_draft(tracking_id: str, credentials=None) -> dict:
     # already-created draft.
     try:
         from datetime import datetime, timezone
-        db.collection("email_tracking").document(tracking_id).update({
+        thread_store.update_tracking(tracking_id, {
             "status": "followup_drafted",
             "followup_draft_id": draft_id,
             "followup_at": datetime.now(timezone.utc).isoformat(),
