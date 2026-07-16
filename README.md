@@ -49,13 +49,20 @@ Deployed on Google Cloud Run in the `keraltysandbox` GCP project (`us-central1`)
 - **Searches and reasons over a corporate Knowledge Base** — a hybrid BM25 + dense-embedding
   retrieval pipeline with Gemini reranking and an abstention gate, so the assistant says "I
   don't know" instead of guessing.
-- **Manages email** — reads, triages, drafts (two length variants, the executive picks one
-  before anything is drafted or approved), and sends via Gmail (approval-gated sends, signed
-  with the active signature). The
-  executive email dashboard shows AI-derived priority (not just Gmail's generic flags) on
-  today's inbox, honestly reports when a fetch fails instead of showing false zeros, and
-  generates a real, topic-aware follow-up draft — shown inline — with one click. "Today" is
-  computed in the executive's own current timezone, wherever they're logged in from.
+- **Manages email — a full management center (Correo Ejecutivo v2)** — persistent per-thread
+  state over a rolling 7-day window (received + sent, per-executive configurable): every
+  thread gets an AI summary, suggested action, detected deadline and faceted classification
+  (priority / requires-action / awaiting-reply / lifecycle state) computed **incrementally**
+  (only new or changed threads hit the AI). Four computed views (Inbox / Críticos /
+  Pendientes / Seguimiento), automatic follow-up detection with days-without-reply,
+  postpone/resolve, response detection (a reply — even one sent directly from Gmail — updates
+  the state), manual priority corrections the AI may raise but never lower, and Gmail push
+  notifications that update state in real time. Replies are drafted **from the dashboard**
+  (accept / decline / ask for info / delegate / free instruction, in the executive's style
+  and signature, in the sender's language), editable inline, and sent only through the same
+  server-verified single-use approval gate as the chat. A weekly digest (in-app + optional
+  self-addressed email, per-user opt-out) summarizes the week. Chat-based email tools keep
+  working unchanged.
 - **Voice input, and spoken replies on demand** — speak a request via the Gemini Live API, and
   click any reply to hear it read aloud with Gemini's own multilingual text-to-speech (not the
   browser's built-in voices, which are inconsistent and often mispronounce Spanish).
