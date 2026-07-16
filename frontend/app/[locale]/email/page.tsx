@@ -15,6 +15,7 @@ import { Loader2, Mail, RefreshCw, Settings } from 'lucide-react';
 import { apiFetch, UnauthorizedError } from '@/lib/api';
 import ThreadCard, { FollowupResult } from '@/components/email/ThreadCard';
 import EmailSettings from '@/components/email/EmailSettings';
+import SearchBar from '@/components/email/SearchBar';
 import {
   EmailIndicators, EmailSettingsData, Priority, ThreadState, ThreadsPayload,
   ViewTab, threadInView, PRIORITY_KEY, PRIORITY_STYLES,
@@ -191,6 +192,8 @@ export default function EmailPage() {
         </div>
       </div>
 
+      <SearchBar />
+
       {/* Indicator tiles = view navigation */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
         {VIEWS.map(v => (
@@ -275,6 +278,7 @@ export default function EmailPage() {
                 onGenerateFollowup={handleGenerateFollowup}
                 generatingFollowup={generatingId === thread.tracking_id}
                 followupResult={thread.tracking_id ? followupResult[thread.tracking_id] : undefined}
+                onSent={fetchStored}
               />
             ))}
           </ul>

@@ -8,23 +8,28 @@ Scan progress streams over SSE with the exact frame format ChatWindow already
 parses (data:{"type":...}\n\n) — no scan-status collection, no polling.
 """
 
+import hashlib
 import json
 import queue
 import threading
-from datetime import datetime, timezone
-from typing import Optional
+import uuid
+from datetime import datetime, timedelta, timezone
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from routers.email import _credentials_for_user
-from services.email import scan_service, thread_store
+from services.email import reply_service, scan_service, thread_store
+from services.email.gmail_provider import GmailProvider
+from services.firestore import FirestoreService
 
 router = APIRouter(prefix="/api/email", tags=["email-v2"])
 
 _VALID_STATES = {"gestionado", "resuelto"}
 _VALID_PRIORITIES = {"CRITICO", "ALTO", "MEDIO", "BAJO"}
+_VALID_ACTIONS = {"aceptar", "declinar", "mas_info", "delegar", "libre"}
 
 
 def _user_id(request: Request) -> str:
@@ -155,3 +160,180 @@ def put_settings(body: SettingsUpdate, request: Request):
     saved = thread_store.update_email_settings(
         _user_id(request), body.model_dump(exclude_none=True))
     return {"status": "success", "settings": saved}
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — search + dashboard draft cycle
+
+
+@router.get("/search")
+def search(request: Request, q: str, max: int = 25):
+    """Gmail search joined with stored thread state — an analyzed hit shows its
+    facets; an unanalyzed one is shown raw (search never triggers analysis)."""
+    user_id = _user_id(request)
+    creds = _credentials_for_user(user_id)
+    max_results = min(max, 25)
+    try:
+        raw = GmailProvider.search_threads(q, max_results=max_results, credentials=creds)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Search failed: {e}")
+    results, seen = [], set()
+    for m in raw:
+        tid = m.get("thread_id")
+        if tid in seen:
+            continue
+        seen.add(tid)
+        state = thread_store.get_thread(user_id, tid) if tid else None
+        results.append({**m, "state": state})
+    return {"status": "success", "results": results}
+
+
+class DraftRequest(BaseModel):
+    action: str
+    instruction: str = ""
+    language: Optional[str] = None  # es|en|None (None = match the sender)
+    modifiers: List[str] = []       # shorter | more_formal
+    previous_draft_id: Optional[str] = None
+
+
+class DraftUpdate(BaseModel):
+    to: str
+    subject: str
+    body: str
+    thread_id: Optional[str] = None
+    in_reply_to: Optional[str] = None
+    references: Optional[str] = None
+
+
+class ApprovalRequest(BaseModel):
+    subject: str = ""
+    to: str = ""
+    preview: str = ""
+
+
+@router.post("/threads/{thread_id}/draft")
+def create_reply_draft(thread_id: str, body: DraftRequest, request: Request):
+    if body.action not in _VALID_ACTIONS:
+        raise HTTPException(status_code=422, detail="Invalid action")
+    if body.language is not None and body.language not in ("es", "en"):
+        raise HTTPException(status_code=422, detail="language must be es|en")
+    user_id = _user_id(request)
+    creds = _credentials_for_user(user_id)
+    doc = thread_store.get_thread(user_id, thread_id)
+    try:
+        result = reply_service.generate_reply_draft(
+            user_id=user_id, thread_id=thread_id, action=body.action,
+            instruction=body.instruction, language=body.language,
+            modifiers=body.modifiers, previous_draft_id=body.previous_draft_id,
+            resumen=(doc or {}).get("resumen", ""), credentials=creds,
+        )
+        return {"status": "success", **result}
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Draft generation failed: {e}")
+
+
+@router.put("/drafts/{draft_id}")
+def update_draft(draft_id: str, body: DraftUpdate, request: Request):
+    """Persists the executive's edits to the REAL Gmail draft — the edited text
+    is what a later send actually delivers. The signature is re-applied
+    server-side, so the edited body must stay signature-free."""
+    user_id = _user_id(request)
+    creds = _credentials_for_user(user_id)
+    signature = None
+    try:
+        from services.signature_service import resolve_active
+        signature = resolve_active(user_id)
+    except Exception as e:
+        print(f"[email_v2] signature lookup failed: {e}")
+    try:
+        new_id = GmailProvider.update_draft(
+            draft_id, to=body.to, subject=body.subject, body=body.body,
+            thread_id=body.thread_id, credentials=creds, signature=signature,
+            in_reply_to=body.in_reply_to, references=body.references,
+        )
+        return {"status": "success", "draft_id": new_id}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Draft update failed: {e}")
+
+
+@router.delete("/drafts/{draft_id}")
+def discard_draft(draft_id: str, request: Request):
+    creds = _credentials_for_user(_user_id(request))
+    try:
+        GmailProvider.delete_draft(draft_id, credentials=creds)
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Draft delete failed: {e}")
+
+
+@router.post("/drafts/{draft_id}/request-approval")
+def request_approval(draft_id: str, body: ApprovalRequest, request: Request):
+    """Creates the same approval task shape the chat flow uses
+    (tools/approval_tools.py) — the send endpoint below verifies and consumes
+    it server-side, identically to tools/_approval.py."""
+    user_id = _user_id(request)
+    task_id = str(uuid.uuid4())
+    FirestoreService.create_task(task_id, {
+        "type": "generic_approval",
+        "description": f"Enviar correo (dashboard): {body.subject or draft_id}",
+        "document_id": draft_id,
+        "changes_summary": f"Para: {body.to}\n\n{body.preview[:1500]}",
+        "status": "pending",
+        "user_id": user_id,
+    })
+    return {"status": "pending_approval", "task_id": task_id}
+
+
+@router.post("/drafts/{draft_id}/send")
+def send_draft(draft_id: str, request: Request, thread_id: Optional[str] = None):
+    """HITL-gated send: requires an approved, user-owned, not-yet-consumed task
+    for this exact draft_id. One approval = one send."""
+    user_id = _user_id(request)
+    task = FirestoreService.find_approved_task(user_id, draft_id)
+    if not task:
+        raise HTTPException(
+            status_code=403,
+            detail="No hay una aprobación válida registrada para este borrador.")
+    FirestoreService.consume_task(task["task_id"])
+
+    creds = _credentials_for_user(user_id)
+    try:
+        message_id = GmailProvider.send_draft(draft_id, credentials=creds)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Send failed: {e}")
+
+    try:
+        from models.schemas import AuditEvent
+        FirestoreService.log_audit_event(AuditEvent(
+            event_id=str(uuid.uuid4()),
+            user_email_hash=hashlib.sha256(user_id.encode()).hexdigest(),
+            action="email_send",
+            resource_type="email",
+            resource_id=draft_id,
+            timestamp=datetime.now(timezone.utc),
+            metadata={"source": "dashboard"},
+        ))
+    except Exception as e:
+        print(f"[email_v2] audit log failed: {e}")
+
+    # Immediate UI state: replying marks the thread managed; a follow-up send
+    # restarts its tracking clock. The next scan re-derives all of this from
+    # Gmail authoritatively.
+    if thread_id:
+        doc = thread_store.update_thread(user_id, thread_id, {
+            "estado_gestion": "gestionado",
+            "esperando_respuesta": False,
+        })
+        if doc and doc.get("tracking_id"):
+            followup_days = thread_store.get_email_settings(user_id)["followup_days"]
+            try:
+                thread_store.update_tracking(doc["tracking_id"], {
+                    "status": "waiting",
+                    "deadline": datetime.now(timezone.utc) + timedelta(days=followup_days),
+                })
+            except Exception as e:
+                print(f"[email_v2] tracking reset failed: {e}")
+
+    return {"status": "success", "sent": True, "message_id": message_id}

@@ -2,7 +2,8 @@
 
 import React, { useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { CalendarClock, Check, CheckCheck, Clock, Loader2, Send, Sparkles } from 'lucide-react';
+import { CalendarClock, Check, CheckCheck, Clock, Loader2, Reply, Send, Sparkles } from 'lucide-react';
+import DraftPanel from './DraftPanel';
 import {
   ACCION_KEY, ESTADO_KEY, PRIORITY_KEY, PRIORITY_STYLES,
   Priority, ThreadState, ViewTab,
@@ -23,18 +24,20 @@ interface Props {
   onGenerateFollowup: (trackingId: string) => void;
   generatingFollowup: boolean;
   followupResult?: FollowupResult;
+  onSent: () => void;
 }
 
 const PRIORITIES: Priority[] = ['CRITICO', 'ALTO', 'MEDIO', 'BAJO'];
 
 export default function ThreadCard({
   thread: t, view, onSetState, onSetPriority, onPostpone,
-  onGenerateFollowup, generatingFollowup, followupResult,
+  onGenerateFollowup, generatingFollowup, followupResult, onSent,
 }: Props) {
   const tr = useTranslations('email');
   const locale = useLocale();
   const [postponing, setPostponing] = useState(false);
   const [postponeDate, setPostponeDate] = useState('');
+  const [replying, setReplying] = useState(false);
 
   const isFollowupView = view === 'followup';
   const displayName = t.is_sent_thread ? t.to : t.from;
@@ -119,6 +122,15 @@ export default function ThreadCard({
 
       {/* Action buttons — viewing a card never changes state; these do */}
       <div className="flex items-center gap-2 mt-2 flex-wrap">
+        {!isFollowupView && !t.is_sent_thread && !replying && (
+          <button
+            type="button"
+            onClick={() => setReplying(true)}
+            className="flex items-center gap-1 text-xs px-3 py-1 bg-[var(--color-primary)] text-white rounded-[6px] hover:bg-[var(--color-primary-dark)] transition-colors"
+          >
+            <Reply className="h-3 w-3" /> {tr('reply')}
+          </button>
+        )}
         {(t.estado_gestion === 'nuevo' || t.estado_gestion === 'respondido') && (
           <button
             type="button"
@@ -184,6 +196,14 @@ export default function ThreadCard({
           </button>
         )}
       </div>
+
+      {replying && (
+        <DraftPanel
+          threadId={t.thread_id}
+          onClose={() => setReplying(false)}
+          onSent={onSent}
+        />
+      )}
     </li>
   );
 }
