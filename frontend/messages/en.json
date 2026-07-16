@@ -257,7 +257,10 @@
     "searchPlaceholder": "Search by sender, subject, keyword… (Gmail syntax)",
     "search": "Search",
     "noResults": "No results.",
-    "notAnalyzed": "Not analyzed"
+    "notAnalyzed": "Not analyzed",
+    "digestTitle": "Weekly digest",
+    "digestEmpty": "No weekly digest generated yet.",
+    "digestWeekOf": "Week from {from} to {to}"
   },
   "errors": {
     "networkError": "Connection error. Please check your internet connection.",

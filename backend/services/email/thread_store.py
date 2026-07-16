@@ -195,6 +195,20 @@ def update_email_settings(user_id: str, updates: Dict[str, Any]) -> Dict[str, An
     return current
 
 
+def get_watch_meta(user_id: str) -> Dict[str, Any]:
+    try:
+        doc = db.collection("users").document(user_id).get()
+        if doc.exists:
+            return doc.to_dict().get("gmail_watch") or {}
+    except Exception as e:
+        print(f"[thread_store] get_watch_meta failed: {e}")
+    return {}
+
+
+def update_watch_meta(user_id: str, meta: Dict[str, Any]) -> None:
+    db.collection("users").document(user_id).set({"gmail_watch": meta}, merge=True)
+
+
 def get_scan_meta(user_id: str) -> Dict[str, Any]:
     try:
         doc = db.collection("users").document(user_id).get()

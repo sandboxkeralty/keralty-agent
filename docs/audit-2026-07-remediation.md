@@ -108,3 +108,27 @@ Tracked, intentionally out of scope this cycle:
 - Assorted Low: Drive `list_documents` ignores pagination; RRF `k_rrf=60` hardcoded;
   `?token=` in the OAuth redirect URL lands in server/referrer logs; SSE partial-message /
   network-drop handling; `LocaleSwitcher` drops query string.
+
+---
+
+## Excepción HITL documentada — correo del resumen semanal (julio 2026, Email v2 fase 3)
+
+La regla de la plataforma es que **todo envío de correo exige aprobación humana registrada,
+de un solo uso, verificada en servidor**. El digest semanal introduce la ÚNICA excepción
+aprobada: un envío automático programado (Cloud Scheduler → `/hooks/digest` →
+`GmailProvider.send_message`) **sin aprobación por envío**, permitido bajo estas condiciones
+estrictas (decisión del product owner, julio 2026):
+
+1. **Solo auto-notificación**: se envía exclusivamente desde la cuenta Gmail del propio
+   ejecutivo a su misma dirección (`to = user_id`). No existen otras credenciales de envío.
+2. **Contenido generado por el sistema**: es un reporte del estado de `email_threads`
+   (totales, críticos, pendientes, seguimiento) + un párrafo narrativo; nunca correspondencia
+   de negocio.
+3. **Opt-out por usuario**: `users/{email}.email_settings.digest_email_enabled` (UI:
+   Preferencias del dashboard de correo). Con el flag apagado, el digest queda solo in-app.
+4. **No generalizable**: `send_message` no debe usarse para ningún otro destinatario o
+   contenido; cualquier envío de negocio sigue pasando por el flujo borrador → aprobación →
+   `send_draft` con verificación y consumo del task en servidor.
+
+Todo envío de negocio del dashboard (fase 2) usa el mismo gate de código del chat:
+`find_approved_task` + `consume_task` sobre el `draft_id` exacto, auditado en `audit_events`.

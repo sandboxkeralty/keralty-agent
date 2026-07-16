@@ -322,6 +322,77 @@ class GmailProvider:
         service = get_gmail_service(credentials)
         service.users().drafts().delete(userId="me", id=draft_id).execute()
 
+    # ------------------------------------------------------------------
+    # Phase 3 — push notifications + direct send (weekly digest)
+
+    @staticmethod
+    def watch(topic_name: str, credentials=None) -> Dict[str, Any]:
+        """Registers Gmail push notifications to a Pub/Sub topic. Expires in
+        ~7 days — renewal happens at scan time and via the daily Scheduler job."""
+        service = get_gmail_service(credentials)
+        resp = service.users().watch(userId="me", body={
+            "topicName": topic_name,
+            "labelIds": ["INBOX", "SENT"],
+            "labelFilterBehavior": "INCLUDE",
+        }).execute()
+        return {
+            "history_id": str(resp.get("historyId", "")),
+            "expiration_ms": int(resp.get("expiration", 0)),
+        }
+
+    @staticmethod
+    def stop_watch(credentials=None) -> None:
+        service = get_gmail_service(credentials)
+        service.users().stop(userId="me").execute()
+
+    @staticmethod
+    def list_history(start_history_id: str, credentials=None) -> Dict[str, Any]:
+        """Thread ids changed since start_history_id, plus the newest history id.
+        Raises HistoryExpired when Gmail no longer retains that point (404) —
+        the caller must fall back to a full scan."""
+        from googleapiclient.errors import HttpError
+        service = get_gmail_service(credentials)
+        thread_ids: set = set()
+        latest = start_history_id
+        token = None
+        try:
+            while True:
+                resp = service.users().history().list(
+                    userId="me", startHistoryId=start_history_id, pageToken=token,
+                ).execute()
+                latest = resp.get("historyId", latest)
+                for h in resp.get("history", []):
+                    for m in h.get("messages", []):
+                        if m.get("threadId"):
+                            thread_ids.add(m["threadId"])
+                token = resp.get("nextPageToken")
+                if not token:
+                    break
+        except HttpError as e:
+            if getattr(e, "resp", None) is not None and e.resp.status == 404:
+                raise HistoryExpired(start_history_id)
+            raise
+        return {"thread_ids": thread_ids, "history_id": str(latest)}
+
+    @staticmethod
+    def send_message(to: str, subject: str, body: str, credentials=None,
+                     html: Optional[str] = None) -> str:
+        """Direct send without a draft — used ONLY for the weekly digest
+        self-notification (the documented HITL exception; every business email
+        still goes through the approval-gated draft/send flow)."""
+        service = get_gmail_service(credentials)
+        if html:
+            message = MIMEMultipart("alternative")
+            message.attach(MIMEText(body, "plain"))
+            message.attach(MIMEText(html, "html"))
+        else:
+            message = MIMEText(body)
+        message["to"] = to
+        message["subject"] = subject
+        raw = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+        sent = service.users().messages().send(userId="me", body={"raw": raw}).execute()
+        return sent.get("id", "")
+
     @staticmethod
     def send_draft(draft_id: str, credentials=None) -> str:
         service = get_gmail_service(credentials)

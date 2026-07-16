@@ -250,6 +250,69 @@ def assemble(user_id: str, user_settings: Dict[str, Any],
     }
 
 
+def process_thread_ids(user_id: str, thread_ids: List[str],
+                       stored: Dict[str, Dict[str, Any]], followup_days: int,
+                       now_ms: int, credentials,
+                       emit: Optional[Callable[[Dict[str, Any]], None]] = None,
+                       warnings: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """Fetch + transitions + analysis for a set of thread ids. Shared by the
+    dashboard scan and the Gmail push handler (Phase 3). Does NOT persist —
+    the caller decides when to upsert."""
+    emit = emit or (lambda evt: None)
+    warnings = warnings if warnings is not None else []
+    try:
+        batch = GmailProvider.get_threads_batch(thread_ids, credentials=credentials)
+        if batch["failed"]:
+            warnings.append("gmail_fetch_partial")
+    except Exception as e:
+        print(f"[scan_service] batch fetch failed: {e}")
+        warnings.append("gmail_fetch")
+        return []
+
+    analysis_inputs, docs_pending = [], []
+    for tid, thread in batch["threads"].items():
+        fields = _compute_thread_fields(thread)
+        if not fields:
+            continue
+        doc = _apply_transitions(stored.get(tid), fields, followup_days, now_ms)
+        docs_pending.append(doc)
+        analysis_inputs.append({
+            "subject": doc.get("subject", ""),
+            "from": doc.get("from", ""),
+            "to": doc.get("to", ""),
+            "is_sent_thread": doc.get("is_sent_thread", False),
+            "excerpt": _build_excerpt(thread),
+        })
+
+    emit({"type": "progress", "phase": "analyzing", "total": len(docs_pending)})
+    analyses = analysis_service.analyze_threads(analysis_inputs)
+    if any(a is None for a in analyses):
+        warnings.append("analysis")
+    return [_apply_analysis(doc, analysis)
+            for doc, analysis in zip(docs_pending, analyses)]
+
+
+def maybe_register_watch(user_id: str, credentials) -> None:
+    """Best-effort Gmail watch (re-)registration when push is configured and
+    the current watch is missing or expiring within 48h. Runs at the end of
+    every successful scan; the daily Scheduler job covers inactive users."""
+    if not (settings.HOOKS_OIDC_SERVICE_ACCOUNT and settings.GMAIL_PUSH_TOPIC):
+        return
+    try:
+        meta = thread_store.get_watch_meta(user_id)
+        expiration = meta.get("expiration_ms") or 0
+        if expiration - _now_ms() > 48 * 3_600_000:
+            return
+        result = GmailProvider.watch(settings.GMAIL_PUSH_TOPIC, credentials=credentials)
+        thread_store.update_watch_meta(user_id, {
+            **result, "registered_at": _now_ms(),
+        })
+        print(f"[scan_service] gmail watch registered for {user_id}, "
+              f"expires {result.get('expiration_ms')}")
+    except Exception as e:
+        print(f"[scan_service] watch registration failed: {e}")
+
+
 # ---------------------------------------------------------------------------
 # the scan
 
@@ -300,40 +363,10 @@ def run_scan(user_id: str, credentials,
 
     updated_docs: List[Dict[str, Any]] = []
     if to_fetch:
-        # 3. Batch-fetch changed/new threads.
-        try:
-            batch = GmailProvider.get_threads_batch(to_fetch, credentials=credentials)
-            if batch["failed"]:
-                warnings.append("gmail_fetch_partial")
-        except Exception as e:
-            print(f"[scan_service] batch fetch failed: {e}")
-            warnings.append("gmail_fetch")
-            batch = {"threads": {}, "failed": to_fetch}
-
-        # 4. Transitions + analysis for each fetched thread.
-        analysis_inputs, docs_pending = [], []
-        for tid, thread in batch["threads"].items():
-            fields = _compute_thread_fields(thread)
-            if not fields:
-                continue
-            doc = _apply_transitions(stored.get(tid), fields, followup_days, now_ms)
-            docs_pending.append(doc)
-            analysis_inputs.append({
-                "subject": doc.get("subject", ""),
-                "from": doc.get("from", ""),
-                "to": doc.get("to", ""),
-                "is_sent_thread": doc.get("is_sent_thread", False),
-                "excerpt": _build_excerpt(thread),
-            })
-
-        emit({"type": "progress", "phase": "analyzing", "total": len(docs_pending)})
-        analyses = analysis_service.analyze_threads(analysis_inputs)
-        if any(a is None for a in analyses):
-            warnings.append("analysis")
-        for doc, analysis in zip(docs_pending, analyses):
-            updated_docs.append(_apply_analysis(doc, analysis))
-        doc_map = {d["thread_id"]: d for d in updated_docs}
-        stored.update(doc_map)
+        updated_docs = process_thread_ids(
+            user_id, to_fetch, stored, followup_days, now_ms, credentials,
+            emit=emit, warnings=warnings)
+        stored.update({d["thread_id"]: d for d in updated_docs})
 
     # 5. Reconcile manual tracking records (chat "haz seguimiento a este correo").
     try:
@@ -349,6 +382,9 @@ def run_scan(user_id: str, credentials,
         "last_scan_at": now_ms,
         "last_scan_thread_count": len(refs),
     })
+
+    # 7. Keep push notifications alive (Phase 3; no-op when unconfigured).
+    maybe_register_watch(user_id, credentials)
 
     result = assemble(user_id, user_settings, warnings)
     result["analyzed_count"] = len(updated_docs)

@@ -16,6 +16,7 @@ import { apiFetch, UnauthorizedError } from '@/lib/api';
 import ThreadCard, { FollowupResult } from '@/components/email/ThreadCard';
 import EmailSettings from '@/components/email/EmailSettings';
 import SearchBar from '@/components/email/SearchBar';
+import DigestView from '@/components/email/DigestView';
 import {
   EmailIndicators, EmailSettingsData, Priority, ThreadState, ThreadsPayload,
   ViewTab, threadInView, PRIORITY_KEY, PRIORITY_STYLES,
@@ -228,6 +229,8 @@ export default function EmailPage() {
           {t('summaryWarning')}
         </div>
       )}
+
+      <DigestView />
 
       {/* Thread list for the active view */}
       <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm">

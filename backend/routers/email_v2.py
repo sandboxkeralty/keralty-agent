@@ -162,6 +162,14 @@ def put_settings(body: SettingsUpdate, request: Request):
     return {"status": "success", "settings": saved}
 
 
+@router.get("/digest")
+def get_digest(request: Request):
+    """Latest stored weekly digest (Phase 3 in-app view)."""
+    from services.email import digest_service
+    digest = digest_service.get_latest(_user_id(request))
+    return {"status": "success", "digest": digest}
+
+
 # ---------------------------------------------------------------------------
 # Phase 2 — search + dashboard draft cycle
 

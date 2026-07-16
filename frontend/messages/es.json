@@ -257,7 +257,10 @@
     "searchPlaceholder": "Buscar por remitente, asunto, palabra clave… (sintaxis Gmail)",
     "search": "Buscar",
     "noResults": "Sin resultados.",
-    "notAnalyzed": "Sin analizar"
+    "notAnalyzed": "Sin analizar",
+    "digestTitle": "Resumen semanal",
+    "digestEmpty": "Aún no hay un resumen semanal generado.",
+    "digestWeekOf": "Semana del {from} al {to}"
   },
   "errors": {
     "networkError": "Error de conexión. Por favor verifica tu conexión a internet.",
