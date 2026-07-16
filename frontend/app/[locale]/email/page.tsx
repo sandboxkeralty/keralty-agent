@@ -1,118 +1,170 @@
 "use client";
 
-import React, { useEffect, useState } from 'react';
+// Correo Ejecutivo v2 — management center over per-thread state.
+//
+// Flow: mount → GET /api/email/threads (instant paint from stored state) →
+// POST /api/email/scan streamed as SSE (same data:{json}\n\n frame format the
+// chat stream uses) → progress indicator while Gmail/Gemini work → replace
+// state on the final "done" frame. The four tiles are computed views over
+// facets — the counts come from the server, the lists are filtered with the
+// SAME rules in components/email/types.ts (threadInView).
+
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocale, useTranslations } from 'next-intl';
-import { Mail, Loader2, RefreshCw, Send, Clock } from 'lucide-react';
+import { Loader2, Mail, RefreshCw, Settings } from 'lucide-react';
 import { apiFetch, UnauthorizedError } from '@/lib/api';
+import ThreadCard, { FollowupResult } from '@/components/email/ThreadCard';
+import EmailSettings from '@/components/email/EmailSettings';
+import {
+  EmailIndicators, EmailSettingsData, Priority, ThreadState, ThreadsPayload,
+  ViewTab, threadInView, PRIORITY_KEY, PRIORITY_STYLES,
+} from '@/components/email/types';
 
-type Priority = 'CRITICO' | 'ALTO' | 'MEDIO' | 'BAJO';
-
-interface EmailThread {
-  id: string;
-  subject: string;
-  from: string;
-  date: string;
-  snippet: string;
-  priority?: Priority;
+interface ScanProgress {
+  phase: 'listing' | 'fetching' | 'analyzing';
+  total?: number;
 }
 
-interface TrackedEmail {
-  tracking_id: string;
-  message_id: string;
-  subject?: string;
-  to?: string;
-  deadline?: string;
-  status: string;
-}
+const EMPTY_INDICATORS: EmailIndicators = { bandeja: 0, criticos: 0, pendientes: 0, seguimiento: 0 };
+const DEFAULT_SETTINGS: EmailSettingsData = { window_days: 7, followup_days: 3, digest_email_enabled: true };
 
-interface EmailIndicators {
-  bandeja: number;
-  criticos: number;
-  pendientes: number;
-  seguimiento: number;
-}
-
-interface FollowupResult {
-  subject?: string;
-  body?: string;
-  error?: string;
-}
-
-const PRIORITY_STYLES: Record<Priority, string> = {
-  CRITICO: 'bg-red-100 text-red-700',
-  ALTO: 'bg-orange-100 text-orange-700',
-  MEDIO: 'bg-yellow-100 text-yellow-700',
-  BAJO: 'bg-gray-100 text-gray-600',
-};
-
-const PRIORITY_KEY: Record<Priority, string> = {
-  CRITICO: 'priorityCritical',
-  ALTO: 'priorityHigh',
-  MEDIO: 'priorityMedium',
-  BAJO: 'priorityLow',
-};
+const VIEWS: { id: ViewTab; labelKey: string; indicator: keyof EmailIndicators; color: string }[] = [
+  { id: 'inbox', labelKey: 'tabInbox', indicator: 'bandeja', color: 'text-[var(--color-primary)]' },
+  { id: 'critical', labelKey: 'tabCritical', indicator: 'criticos', color: 'text-red-500' },
+  { id: 'pending', labelKey: 'tabPending', indicator: 'pendientes', color: 'text-orange-500' },
+  { id: 'followup', labelKey: 'tabFollowup', indicator: 'seguimiento', color: 'text-yellow-600' },
+];
 
 export default function EmailPage() {
   const t = useTranslations('email');
   const locale = useLocale();
-  const [threads, setThreads] = useState<EmailThread[]>([]);
-  const [tracked, setTracked] = useState<TrackedEmail[]>([]);
-  const [indicators, setIndicators] = useState<EmailIndicators>({ bandeja: 0, criticos: 0, pendientes: 0, seguimiento: 0 });
+  const [threads, setThreads] = useState<ThreadState[]>([]);
+  const [indicators, setIndicators] = useState<EmailIndicators>(EMPTY_INDICATORS);
+  const [settings, setSettings] = useState<EmailSettingsData>(DEFAULT_SETTINGS);
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'inbox' | 'tracking'>('inbox');
+  const [scan, setScan] = useState<ScanProgress | null>(null);
+  const [scanFailed, setScanFailed] = useState(false);
+  const [view, setView] = useState<ViewTab>('inbox');
+  const [priorityFilter, setPriorityFilter] = useState<Priority | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
   const [followupResult, setFollowupResult] = useState<Record<string, FollowupResult>>({});
-  const [warnings, setWarnings] = useState<string[]>([]);
-  // null = show all; a Priority filters the inbox list to that badge.
-  const [priorityFilter, setPriorityFilter] = useState<Priority | null>(null);
-  const handleGenerateFollowup = async (trackingId: string) => {
-    setGeneratingId(trackingId);
-    setFollowupResult(prev => {
-      const next = { ...prev };
-      delete next[trackingId];
-      return next;
-    });
-    try {
-      const res = await apiFetch(`/api/email/tracking/${trackingId}/generate-followup`, { method: 'POST' });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.detail || t('followupError'));
-      setFollowupResult(prev => ({ ...prev, [trackingId]: { subject: data.subject, body: data.body } }));
-      // The backend just flipped the tracking status to followup_drafted —
-      // refresh so the badge reflects it without a manual reload.
-      fetchSummary();
-    } catch (e) {
-      if (e instanceof UnauthorizedError) return;
-      setFollowupResult(prev => ({ ...prev, [trackingId]: { error: e instanceof Error ? e.message : t('followupError') } }));
-    } finally {
-      setGeneratingId(null);
-    }
-  };
+  const scanningRef = useRef(false);
 
-  const fetchSummary = async () => {
-    setLoading(true);
+  const applyPayload = useCallback((data: ThreadsPayload) => {
+    setThreads(data.threads || []);
+    setIndicators(data.indicators || EMPTY_INDICATORS);
+    if (data.settings) setSettings(data.settings);
+    setWarnings(data.warnings || []);
+  }, []);
+
+  const fetchStored = useCallback(async () => {
     try {
-      // The executive's live local timezone (wherever they're logged in from
-      // right now, not a fixed HQ timezone) — so "today" in Bandeja/Críticos/
-      // Pendientes reflects their actual calendar day.
-      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-      const res = await apiFetch(`/api/email/summary?tz=${encodeURIComponent(tz)}`);
-      if (res.ok) {
-        const data = await res.json();
-        setThreads(data.inbox_today || []);
-        setTracked(data.tracked || []);
-        setIndicators(data.indicators || { bandeja: 0, criticos: 0, pendientes: 0, seguimiento: 0 });
-        setWarnings(data.warnings || []);
-      }
+      const res = await apiFetch('/api/email/threads');
+      if (res.ok) applyPayload(await res.json());
     } catch (e) {
       if (!(e instanceof UnauthorizedError)) console.error(e);
     } finally {
       setLoading(false);
     }
-  };
+  }, [applyPayload]);
+
+  // Incremental scan over SSE — same frame parsing as the chat stream.
+  const runScan = useCallback(async () => {
+    if (scanningRef.current) return;
+    scanningRef.current = true;
+    setScanFailed(false);
+    setScan({ phase: 'listing' });
+    try {
+      const res = await apiFetch('/api/email/scan', { method: 'POST' });
+      if (!res.ok || !res.body) throw new Error(`scan failed (${res.status})`);
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split('\n\n');
+        buffer = frames.pop() || '';
+        for (const frame of frames) {
+          if (!frame.startsWith('data: ')) continue;
+          const evt = JSON.parse(frame.slice(6));
+          if (evt.type === 'progress') {
+            setScan({ phase: evt.phase, total: evt.total });
+          } else if (evt.type === 'done') {
+            applyPayload(evt as ThreadsPayload);
+          } else if (evt.type === 'error') {
+            setScanFailed(true);
+          }
+        }
+      }
+    } catch (e) {
+      if (e instanceof UnauthorizedError) return;
+      console.error(e);
+      setScanFailed(true);
+    } finally {
+      scanningRef.current = false;
+      setScan(null);
+      setLoading(false);
+    }
+  }, [applyPayload]);
 
   useEffect(() => {
-    fetchSummary();
+    // Instant paint from stored state, then refresh via incremental scan.
+    fetchStored().then(runScan);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // --- thread mutations (optimistic update + server refetch) ---
+
+  const patchThread = useCallback(async (threadId: string, path: string, body: object) => {
+    try {
+      const res = await apiFetch(`/api/email/threads/${threadId}/${path}`, {
+        method: path === 'postpone' ? 'POST' : 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setThreads(prev => prev.map(th => th.thread_id === threadId ? { ...th, ...data.thread } : th));
+        // Re-sync indicators with the server's view rules.
+        fetchStored();
+      }
+    } catch (e) {
+      if (!(e instanceof UnauthorizedError)) console.error(e);
+    }
+  }, [fetchStored]);
+
+  const handleSetState = (id: string, estado: 'gestionado' | 'resuelto') =>
+    patchThread(id, 'state', { estado_gestion: estado });
+  const handleSetPriority = (id: string, prioridad: Priority) =>
+    patchThread(id, 'priority', { prioridad });
+  const handlePostpone = (id: string, until: string) =>
+    patchThread(id, 'postpone', { until });
+
+  const handleGenerateFollowup = async (trackingId: string) => {
+    setGeneratingId(trackingId);
+    setFollowupResult(prev => { const next = { ...prev }; delete next[trackingId]; return next; });
+    try {
+      const res = await apiFetch(`/api/email/tracking/${trackingId}/generate-followup`, { method: 'POST' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.detail || t('followupError'));
+      setFollowupResult(prev => ({ ...prev, [trackingId]: { subject: data.subject, body: data.body } }));
+      fetchStored();
+    } catch (e) {
+      if (e instanceof UnauthorizedError) return;
+      setFollowupResult(prev => ({
+        ...prev, [trackingId]: { error: e instanceof Error ? e.message : t('followupError') },
+      }));
+    } finally {
+      setGeneratingId(null);
+    }
+  };
+
+  const visibleThreads = threads.filter(th =>
+    threadInView(th, view) && (!priorityFilter || th.prioridad === priorityFilter));
 
   return (
     <div className="p-6 max-w-5xl mx-auto w-full">
@@ -122,184 +174,120 @@ export default function EmailPage() {
           <Mail className="h-6 w-6 text-[var(--color-primary)]" />
           <h1 className="text-2xl font-bold text-[var(--color-navy)]">{t('title')}</h1>
         </div>
-        <button
-          onClick={fetchSummary}
-          className="flex items-center gap-2 px-3 py-2 text-sm text-[var(--color-primary)] hover:bg-[var(--color-primary-light)] rounded-[8px] transition-colors"
-        >
-          <RefreshCw className="h-4 w-4" /> {t('refresh')}
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setSettingsOpen(true)}
+            className="flex items-center gap-2 px-3 py-2 text-sm text-[var(--color-text-muted)] hover:bg-[var(--color-background)] rounded-[8px] transition-colors"
+          >
+            <Settings className="h-4 w-4" /> {t('settings')}
+          </button>
+          <button
+            onClick={runScan}
+            disabled={!!scan}
+            className="flex items-center gap-2 px-3 py-2 text-sm text-[var(--color-primary)] hover:bg-[var(--color-primary-light)] rounded-[8px] transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`h-4 w-4 ${scan ? 'animate-spin' : ''}`} /> {t('refresh')}
+          </button>
+        </div>
       </div>
 
-      {/* Stats bar — tiles double as filters/navigation */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        {[
-          { label: t('inboxIndicator'), value: indicators.bandeja, color: 'text-[var(--color-primary)]',
-            onClick: () => { setActiveTab('inbox'); setPriorityFilter(null); },
-            active: activeTab === 'inbox' && priorityFilter === null },
-          { label: t('criticalIndicator'), value: indicators.criticos, color: 'text-red-500',
-            onClick: () => { setActiveTab('inbox'); setPriorityFilter('CRITICO'); },
-            active: activeTab === 'inbox' && priorityFilter === 'CRITICO' },
-          { label: t('pendingIndicator'), value: indicators.pendientes, color: 'text-orange-500',
-            onClick: undefined, active: false },
-          { label: t('followupIndicator'), value: indicators.seguimiento, color: 'text-yellow-600',
-            onClick: () => setActiveTab('tracking'), active: activeTab === 'tracking' },
-        ].map(s => (
+      {/* Indicator tiles = view navigation */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+        {VIEWS.map(v => (
           <button
-            key={s.label}
+            key={v.id}
             type="button"
-            onClick={s.onClick}
-            disabled={!s.onClick}
-            className={`bg-white border rounded-[12px] p-3 text-center shadow-sm transition-colors ${s.active ? 'border-[var(--color-primary)] ring-1 ring-[var(--color-primary)]/40' : 'border-[var(--color-border)]'} ${s.onClick ? 'cursor-pointer hover:border-[var(--color-primary)]/60' : 'cursor-default'}`}
+            onClick={() => { setView(v.id); setPriorityFilter(null); }}
+            className={`bg-white border rounded-[12px] p-3 text-center shadow-sm transition-colors cursor-pointer hover:border-[var(--color-primary)]/60 ${view === v.id ? 'border-[var(--color-primary)] ring-1 ring-[var(--color-primary)]/40' : 'border-[var(--color-border)]'}`}
           >
-            <span className={`text-2xl font-bold ${s.color}`}>{s.value}</span>
-            <p className="text-xs text-[var(--color-text-muted)] uppercase mt-0.5">{s.label}</p>
+            <span className={`text-2xl font-bold ${v.color}`}>{indicators[v.indicator]}</span>
+            <p className="text-xs text-[var(--color-text-muted)] uppercase mt-0.5">{t(v.labelKey)}</p>
           </button>
         ))}
       </div>
 
+      {/* Scan progress — replaces a dead spinner with what's actually happening */}
+      {scan && (
+        <div className="mb-4 flex items-center gap-2 text-xs text-[var(--color-primary)] bg-[var(--color-primary-light)]/40 border border-[var(--color-primary)]/20 rounded-[8px] px-3 py-2">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          {scan.phase === 'analyzing' && scan.total
+            ? t('analyzingNew', { count: scan.total })
+            : t('scanning')}
+        </div>
+      )}
+      {scanFailed && (
+        <div className="mb-4 text-xs text-red-700 bg-red-50 border border-red-200 rounded-[8px] px-3 py-2">
+          {t('scanFailed')}
+        </div>
+      )}
       {warnings.length > 0 && (
         <div className="mb-4 text-xs text-orange-700 bg-orange-50 border border-orange-200 rounded-[8px] px-3 py-2">
           {t('summaryWarning')}
         </div>
       )}
 
-      {/* Tab nav */}
-      <div className="flex gap-1 border-b border-[var(--color-border)] mb-4">
-        {(['inbox', 'tracking'] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === tab ? 'border-[var(--color-primary)] text-[var(--color-primary)]' : 'border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-navy)]'}`}
-          >
-            {tab === 'inbox' ? t('inboxTab') : t('trackingTab')}
-          </button>
-        ))}
+      {/* Thread list for the active view */}
+      <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm">
+        {/* Per-priority filter chips */}
+        {!loading && threads.some(th => threadInView(th, view)) && (
+          <div className="flex items-center flex-wrap gap-2 p-3 border-b border-[var(--color-border)]">
+            {(['CRITICO', 'ALTO', 'MEDIO', 'BAJO'] as Priority[]).map(p => {
+              const count = threads.filter(th => threadInView(th, view) && th.prioridad === p).length;
+              if (count === 0) return null;
+              return (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => setPriorityFilter(prev => prev === p ? null : p)}
+                  className={`text-[10px] font-semibold uppercase px-2 py-1 rounded-full border transition-colors ${PRIORITY_STYLES[p]} ${priorityFilter === p ? 'ring-2 ring-[var(--color-navy)]/40' : 'opacity-80 hover:opacity-100'}`}
+                >
+                  {t(PRIORITY_KEY[p])} · {count}
+                </button>
+              );
+            })}
+            {priorityFilter && (
+              <button type="button" onClick={() => setPriorityFilter(null)} className="text-xs text-[var(--color-text-muted)] underline ml-1">
+                {t('clearFilter')}
+              </button>
+            )}
+          </div>
+        )}
+        {loading ? (
+          <div className="flex items-center justify-center h-48 gap-2 text-[var(--color-text-muted)]">
+            <Loader2 className="h-4 w-4 animate-spin" /> {t('loadingEmails')}
+          </div>
+        ) : visibleThreads.length === 0 ? (
+          <div className="p-8 text-center">
+            <Mail className="h-10 w-10 text-[var(--color-text-muted)] mx-auto mb-3" />
+            <p className="text-[var(--color-text-muted)] text-sm">{t('emptyView')}</p>
+            <p className="text-xs text-[var(--color-text-muted)] mt-1">{t('askAssistantHint')}</p>
+          </div>
+        ) : (
+          <ul className="divide-y divide-[var(--color-border)]">
+            {visibleThreads.map(thread => (
+              <ThreadCard
+                key={thread.thread_id}
+                thread={thread}
+                view={view}
+                onSetState={handleSetState}
+                onSetPriority={handleSetPriority}
+                onPostpone={handlePostpone}
+                onGenerateFollowup={handleGenerateFollowup}
+                generatingFollowup={generatingId === thread.tracking_id}
+                followupResult={thread.tracking_id ? followupResult[thread.tracking_id] : undefined}
+              />
+            ))}
+          </ul>
+        )}
       </div>
 
-      {/* Content */}
-      {activeTab === 'inbox' && (
-        <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm">
-          {/* Per-priority filter chips */}
-          {!loading && threads.length > 0 && (
-            <div className="flex items-center flex-wrap gap-2 p-3 border-b border-[var(--color-border)]">
-              {(['CRITICO', 'ALTO', 'MEDIO', 'BAJO'] as Priority[]).map(p => {
-                const count = threads.filter(th => th.priority === p).length;
-                return (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setPriorityFilter(prev => prev === p ? null : p)}
-                    className={`text-[10px] font-semibold uppercase px-2 py-1 rounded-full border transition-colors ${PRIORITY_STYLES[p]} ${priorityFilter === p ? 'ring-2 ring-[var(--color-navy)]/40' : 'opacity-80 hover:opacity-100'}`}
-                  >
-                    {t(PRIORITY_KEY[p])} · {count}
-                  </button>
-                );
-              })}
-              {priorityFilter && (
-                <button type="button" onClick={() => setPriorityFilter(null)} className="text-xs text-[var(--color-text-muted)] underline ml-1">
-                  {t('clearFilter')}
-                </button>
-              )}
-            </div>
-          )}
-          {loading ? (
-            <div className="flex items-center justify-center h-48 gap-2 text-[var(--color-text-muted)]">
-              <Loader2 className="h-4 w-4 animate-spin" /> {t('loadingEmails')}
-            </div>
-          ) : threads.length === 0 ? (
-            <div className="p-8 text-center">
-              <Mail className="h-10 w-10 text-[var(--color-text-muted)] mx-auto mb-3" />
-              <p className="text-[var(--color-text-muted)] text-sm">
-                {t('noEmailsToday')}
-              </p>
-              <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                {t('askAssistantHint')}
-              </p>
-            </div>
-          ) : (
-            <ul className="divide-y divide-[var(--color-border)]">
-              {threads.filter(th => !priorityFilter || th.priority === priorityFilter).map(thread => (
-                <li key={thread.id} className="p-4 hover:bg-[var(--color-background)] transition-colors">
-                  <div className="flex justify-between items-start mb-1 gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-semibold text-sm text-[var(--color-navy)] truncate">{thread.from}</span>
-                      {thread.priority && (
-                        <span className={`shrink-0 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-full ${PRIORITY_STYLES[thread.priority]}`}>
-                          {t(PRIORITY_KEY[thread.priority])}
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-xs text-[var(--color-text-muted)] shrink-0">{thread.date}</span>
-                  </div>
-                  <p className="text-sm font-medium text-[var(--color-text-primary)]">{thread.subject}</p>
-                  <p className="text-xs text-[var(--color-text-muted)] mt-0.5 line-clamp-1">{thread.snippet}</p>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
-
-      {activeTab === 'tracking' && (
-        <div className="bg-white border border-[var(--color-border)] rounded-[12px] shadow-sm">
-          {tracked.length === 0 ? (
-            <div className="p-8 text-center">
-              <Clock className="h-10 w-10 text-[var(--color-text-muted)] mx-auto mb-3" />
-              <p className="text-[var(--color-text-muted)] text-sm">
-                {t('noTracking')}
-              </p>
-              <p className="text-xs text-[var(--color-text-muted)] mt-1">
-                {t('trackingHint')}
-              </p>
-            </div>
-          ) : (
-            <ul className="divide-y divide-[var(--color-border)]">
-              {tracked.map(item => (
-                <li key={item.tracking_id} className="p-4 flex items-center justify-between">
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-[var(--color-navy)]">{item.subject || t('noSubject')}</p>
-                      {item.status === 'followup_drafted' ? (
-                        <span className="shrink-0 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">{t('statusDrafted')}</span>
-                      ) : (
-                        <span className="shrink-0 text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded-full bg-orange-100 text-orange-700">{t('statusWaiting')}</span>
-                      )}
-                    </div>
-                    {item.to && (
-                      <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{t('to')} {item.to}</p>
-                    )}
-                    {item.deadline && (
-                      <p className="text-xs text-[var(--color-text-muted)] mt-0.5">{t('due')} {new Date(item.deadline).toLocaleDateString(locale)}</p>
-                    )}
-                    {followupResult[item.tracking_id] && (
-                      followupResult[item.tracking_id].error ? (
-                        <p className="text-xs text-red-600 mt-1">{followupResult[item.tracking_id].error}</p>
-                      ) : (
-                        <div className="text-xs mt-2 bg-[var(--color-primary-light)]/50 border border-[var(--color-primary)]/20 rounded-[8px] p-2 max-w-md">
-                          <p className="font-semibold text-[var(--color-primary)] mb-1">{t('followupGenerated')}</p>
-                          <p className="font-medium text-[var(--color-navy)]">{followupResult[item.tracking_id].subject}</p>
-                          <p className="whitespace-pre-wrap text-[var(--color-text-secondary)] mt-1">{followupResult[item.tracking_id].body}</p>
-                        </div>
-                      )
-                    )}
-                  </div>
-                  <button
-                    className="flex items-center gap-1 text-xs px-3 py-1.5 bg-[var(--color-primary)] text-white rounded-[6px] hover:bg-[var(--color-primary-dark)] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    onClick={() => handleGenerateFollowup(item.tracking_id)}
-                    disabled={generatingId === item.tracking_id}
-                  >
-                    {generatingId === item.tracking_id ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <Send className="h-3 w-3" />
-                    )}
-                    {item.status === 'followup_drafted' ? t('regenerateFollowup') : t('generateFollowup')}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+      {settingsOpen && (
+        <EmailSettings
+          initial={settings}
+          locale={locale}
+          onClose={() => setSettingsOpen(false)}
+          onSaved={saved => { setSettings(saved); runScan(); }}
+        />
       )}
     </div>
   );
