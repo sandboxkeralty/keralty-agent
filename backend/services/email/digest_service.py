@@ -131,9 +131,14 @@ def _render_text(sections: Dict[str, Any], narrative: str, locale: str) -> str:
 
 
 def _render_html(text: str) -> str:
+    from services import brand
     body = _html.escape(text).replace("\n", "<br>")
+    logo = brand.logo_for_background("white")
     return (
-        '<div style="font-family:Calibri,Arial,sans-serif;color:#1a1a2e;max-width:640px">'
+        f'<div style="font-family:{brand.EMAIL_FONT_STACK};color:#1a1a2e;max-width:640px">'
+        f'<img src="{logo}" alt="Keralty" style="height:36px;margin-bottom:12px;">'
+        f'<div style="color:{brand.PRIMARY_BLUE};font-weight:bold;font-size:18px;'
+        f'margin-bottom:8px;">Keralty Assistant</div>'
         f'{body}</div>'
     )
 

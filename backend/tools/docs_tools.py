@@ -48,7 +48,7 @@ async def docs_update(document_id: str, content: str, tool_context: ToolContext)
 
 
 async def docs_create(title: str, tool_context: ToolContext, content: Optional[str] = None,
-                      include_signature: bool = False) -> dict:
+                      include_signature: bool = False, include_logo: bool = False) -> dict:
     """Creates a new Google Doc, optionally writing initial content to it.
 
     Args:
@@ -59,6 +59,10 @@ async def docs_create(title: str, tool_context: ToolContext, content: Optional[s
             active signature (text + logo) at the end automatically. The
             content itself must NOT contain a signature or name/role
             placeholders. Leave False for reports, minutes or analyses.
+        include_logo: Set to True for formal/official documents (letters,
+            memos, communications) or when the user asks for the corporate
+            logo — inserts the authorized Keralty logo at the top. Leave
+            False for plain notes, reports or analyses.
     """
     try:
         creds = _credentials(tool_context)
@@ -70,6 +74,9 @@ async def docs_create(title: str, tool_context: ToolContext, content: Optional[s
                 DocsService.append_text(doc_id, content, credentials=creds)
             except Exception as e:
                 print(f"[docs_create] append failed: {e}", flush=True)
+
+        if include_logo:
+            DocsService.insert_logo_header(doc_id, credentials=creds)
 
         if include_signature:
             try:

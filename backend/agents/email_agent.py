@@ -164,14 +164,22 @@ Cuando el usuario pida enviar un correo, el flujo OBLIGATORIO es:
 {signature?}
 """
 
-email_agent = Agent(
-    name="EmailAgent",
-    model=settings.GEMINI_FLASH_MODEL,
-    instruction=INSTRUCTION,
-    description="Intelligent Email management agent",
-    tools=[
-        email_list, email_read, email_search, email_summarize_thread,
-        email_draft, email_send, email_track, email_get_tracking, email_generate_followup,
-        approval_create
-    ]
-)
+def build_agent(model=None):
+    """Constructs a fresh agent instance. model=None keeps the Gemini
+    default; pass a LiteLlm instance (or model string) for other providers.
+    Fresh instances per call — ADK agents are single-parent, so trees for
+    different models must never share sub-agent objects."""
+    return Agent(
+        name="EmailAgent",
+        model=model or settings.GEMINI_FLASH_MODEL,
+        instruction=INSTRUCTION,
+        description="Intelligent Email management agent",
+        tools=[
+            email_list, email_read, email_search, email_summarize_thread,
+            email_draft, email_send, email_track, email_get_tracking, email_generate_followup,
+            approval_create
+        ]
+    )
+
+
+email_agent = build_agent()

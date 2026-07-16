@@ -22,12 +22,35 @@ class Settings(BaseSettings):
     # bumping this when newer models land is just a setting change.
     IMAGEN_MODEL: str = "imagen-3.0-generate-001"
     IMAGEN_ASPECT_RATIO: str = "16:9"
-    # Google Slides ID of the corporate template deck (converted from
-    # branding/Template_Keralty.pptx by scripts/upload_slides_template.py).
+    # Google Slides IDs of the corporate template decks (converted from the
+    # re-themed branding/generated/*.pptx by scripts/upload_slides_template.py).
     # Empty = decks start from a blank default-themed presentation.
-    SLIDES_TEMPLATE_ID: str = ""
+    SLIDES_TEMPLATE_ID: str = ""                      # Template_Keralty (default)
+    SLIDES_TEMPLATE_ID_PRESIDENCIA_CORP: str = ""     # Template_Presidencia__Corporativo
+    SLIDES_TEMPLATE_ID_PRESIDENCIA_STD: str = ""      # Template_Presidencia__Estandar
+    # Brand engine font: the Google-catalog stand-in for Clan Pro (which the
+    # Slides/Docs APIs cannot render). Confirmed empirically via thumbnail probe.
+    BRAND_ENGINE_FONT: str = "Archivo"
+    BRAND_LOGOS_ENABLED: bool = True
     GEMINI_TTS_MODEL: str = "gemini-2.5-flash-preview-tts"
     GEMINI_TTS_VOICE: str = "Kore"
+
+    # Multi-LLM chat (model picker). Keys must be ambient in os.environ on
+    # Cloud Run — LiteLLM/openai read them directly. A missing key hides that
+    # provider's models from the picker (GET /api/models).
+    ANTHROPIC_API_KEY: Optional[str] = None
+    OPENAI_API_KEY: Optional[str] = None
+    MODEL_ID_CLAUDE_FABLE: str = "claude-fable-5"
+    MODEL_ID_CLAUDE_OPUS: str = "claude-opus-4-8"
+    MODEL_ID_CLAUDE_SONNET: str = "claude-sonnet-5"
+    MODEL_ID_CLAUDE_HAIKU: str = "claude-haiku-4-5-20251001"
+    # OpenAI ids probed live against the account's /v1/models (July 2026) —
+    # env-overridable if OpenAI renames them.
+    MODEL_ID_OPENAI_SOL: str = "gpt-5.6-sol"
+    MODEL_ID_OPENAI_TERRA: str = "gpt-5.6-terra"
+    MODEL_ID_OPENAI_LUNA: str = "gpt-5.6-luna"
+    MODEL_ID_OPENAI_GPT55: str = "gpt-5.5"
+    OPENAI_IMAGE_MODEL: str = "gpt-image-2"  # probed available July 2026
 
     GOOGLE_CLIENT_ID: str = ""
     GOOGLE_CLIENT_SECRET: str = ""

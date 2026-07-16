@@ -50,7 +50,11 @@
     "styleNone": "Sin estilo",
     "stylePresets": "Predefinidos",
     "styleMine": "Mis estilos",
-    "styleDefaultTag": "por defecto"
+    "styleDefaultTag": "por defecto",
+    "modelPicker": "Elegir modelo de IA",
+    "modelPickerTitle": "Modelo de IA",
+    "modelDefaultTag": "por defecto",
+    "activeModel": "Modelo: {name}"
   },
   "approval": {
     "title": "Revisión requerida",

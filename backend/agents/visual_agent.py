@@ -3,6 +3,7 @@ from tools.slides_tools import slides_create, slides_add_slide, slides_add_image
 from tools.image_tools import image_generate
 from tools.approval_tools import approval_create
 from config import settings
+from services.brand import BRAND_INSTRUCTION_BLOCK
 
 INSTRUCTION = """
 # IDIOMA — REGLA PRIORITARIA
@@ -171,14 +172,35 @@ formato interno `(..., p.N)`.
   respuesta no. El usuario habla con UN solo asistente: describe tus acciones
   funcionalmente ("voy a preparar el resumen", "estoy buscando la información").
 
+# PLANTILLAS CORPORATIVAS — SELECCIÓN
+Hay tres plantillas oficiales; pasa la elegida en el parámetro `template` de `slides_create`:
+- "keralty" — plantilla ejecutiva general. ES EL DEFAULT: úsala siempre que el usuario no
+  indique otra cosa.
+- "presidencia_corporativo" — presentaciones de Presidencia formales. Úsala cuando el usuario
+  mencione "presidencia", "junta directiva", "directorio" o "corporativo".
+- "presidencia_estandar" — variante estándar de Presidencia. SOLO cuando el usuario diga
+  explícitamente "presidencia estándar" (o "estandar").
+La mención explícita del usuario SIEMPRE gana sobre tu inferencia. Si dudas entre las dos de
+Presidencia, usa "presidencia_corporativo". Menciona en tu propuesta de outline qué plantilla
+usarás.
+
+""" + BRAND_INSTRUCTION_BLOCK + """
 {writing_style?}
 {signature?}
 """
 
-visual_agent = Agent(
-    name="VisualAgent",
-    model=settings.GEMINI_FLASH_MODEL,
-    instruction=INSTRUCTION,
-    description="Creates executive Google Slides presentations with real content and images.",
-    tools=[slides_create, slides_add_slide, slides_add_image, slides_get, image_generate, approval_create],
-)
+def build_agent(model=None):
+    """Constructs a fresh agent instance. model=None keeps the Gemini
+    default; pass a LiteLlm instance (or model string) for other providers.
+    Fresh instances per call — ADK agents are single-parent, so trees for
+    different models must never share sub-agent objects."""
+    return Agent(
+        name="VisualAgent",
+        model=model or settings.GEMINI_FLASH_MODEL,
+        instruction=INSTRUCTION,
+        description="Creates executive Google Slides presentations with real content and images.",
+        tools=[slides_create, slides_add_slide, slides_add_image, slides_get, image_generate, approval_create],
+    )
+
+
+visual_agent = build_agent()

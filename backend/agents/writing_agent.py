@@ -1,4 +1,5 @@
 from google.adk.agents import Agent
+from services.brand import BRAND_INSTRUCTION_BLOCK
 from tools.drive_tools import drive_read
 from tools.rag_tools import context_inject
 from tools.sheets_tools import create_spreadsheet
@@ -126,14 +127,23 @@ en COMPORTAMIENTO); en correos y mensajes se omiten por completo.
   respuesta no. El usuario habla con UN solo asistente: describe tus acciones
   funcionalmente ("voy a preparar el resumen", "estoy buscando la información").
 
+""" + BRAND_INSTRUCTION_BLOCK + """
 {writing_style?}
 {signature?}
 """
 
-writing_agent = Agent(
-    name="WritingAgent",
-    model=settings.GEMINI_PRO_MODEL,
-    instruction=INSTRUCTION,
-    description="Drafts markdown documents for executive summary and proposals.",
-    tools=[drive_read, context_inject, create_spreadsheet, docs_create]
-)
+def build_agent(model=None):
+    """Constructs a fresh agent instance. model=None keeps the Gemini
+    default; pass a LiteLlm instance (or model string) for other providers.
+    Fresh instances per call — ADK agents are single-parent, so trees for
+    different models must never share sub-agent objects."""
+    return Agent(
+        name="WritingAgent",
+        model=model or settings.GEMINI_PRO_MODEL,
+        instruction=INSTRUCTION,
+        description="Drafts markdown documents for executive summary and proposals.",
+        tools=[drive_read, context_inject, create_spreadsheet, docs_create]
+    )
+
+
+writing_agent = build_agent()

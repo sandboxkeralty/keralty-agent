@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import type { AnchorHTMLAttributes, ImgHTMLAttributes } from 'react';
-import { Send, Bot, User, Paperclip, X, Download, Volume2, Loader2, Cloud, HardDrive, PenLine, Check, Image as ImageIcon, UploadCloud } from 'lucide-react';
+import { Send, Bot, User, Paperclip, X, Download, Volume2, Loader2, Cloud, HardDrive, PenLine, Check, Cpu, Image as ImageIcon, UploadCloud } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { SourceChip } from './SourceChip';
@@ -93,7 +93,7 @@ export function ChatWindow() {
   const t = useTranslations('chat');
   const td = useTranslations('documents');
   const locale = useLocale();
-  const { sessionId, messages, setMessages, pendingFolderId, bumpHistoryRefresh } = useChatSession();
+  const { sessionId, messages, setMessages, pendingFolderId, bumpHistoryRefresh, selectedModel, setSelectedModel } = useChatSession();
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [pendingTasks, setPendingTasks] = useState<PendingTask[]>([]);
@@ -111,6 +111,10 @@ export function ChatWindow() {
   const [styleData, setStyleData] = useState<{ presets: WritingStyle[]; styles: WritingStyle[]; default_style_id: string | null } | null>(null);
   const [selectedStyleId, setSelectedStyleId] = useState<string | null>(null);
   const [showStyleMenu, setShowStyleMenu] = useState(false);
+  // Chat model picker: options from GET /api/models (only key-backed models);
+  // selection lives in useChatSession (per-conversation, survives navigation).
+  const [modelData, setModelData] = useState<{ key: string; display_name: string; provider: string; default: boolean }[] | null>(null);
+  const [showModelMenu, setShowModelMenu] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -122,12 +126,13 @@ export function ChatWindow() {
   // previously the only way to dismiss the Drive picker once open was to
   // select a file, with no close button and no click-outside handling.
   useEffect(() => {
-    if (!showAttachMenu && !showPicker && !showStyleMenu) return;
+    if (!showAttachMenu && !showPicker && !showStyleMenu && !showModelMenu) return;
     const handlePointerDown = (e: MouseEvent) => {
       if (attachAreaRef.current && !attachAreaRef.current.contains(e.target as Node)) {
         setShowAttachMenu(false);
         setShowPicker(false);
         setShowStyleMenu(false);
+        setShowModelMenu(false);
       }
     };
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -135,6 +140,7 @@ export function ChatWindow() {
         setShowAttachMenu(false);
         setShowPicker(false);
         setShowStyleMenu(false);
+        setShowModelMenu(false);
       }
     };
     document.addEventListener('mousedown', handlePointerDown);
@@ -143,7 +149,22 @@ export function ChatWindow() {
       document.removeEventListener('mousedown', handlePointerDown);
       document.removeEventListener('keydown', handleKeyDown);
     };
-  }, [showAttachMenu, showPicker, showStyleMenu]);
+  }, [showAttachMenu, showPicker, showStyleMenu, showModelMenu]);
+
+  // Load the selectable chat models once (list is filtered server-side to
+  // key-backed providers, so a dead model is never offered).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await apiJson<{ models: { key: string; display_name: string; provider: string; default: boolean }[] }>('/api/models');
+        if (!cancelled) setModelData(res.models);
+      } catch {
+        // Fetch failed: no picker shown; requests omit model → Gemini default.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Load the user's writing styles once; preselect their saved default.
   useEffect(() => {
@@ -404,6 +425,7 @@ export function ChatWindow() {
             })),
           } : {}),
           ...(selectedStyleId !== null ? { style_id: selectedStyleId } : {}),
+          ...(selectedModel ? { model: selectedModel } : {}),
         }),
       });
 
@@ -663,6 +685,20 @@ export function ChatWindow() {
                     <PenLine size={16} />
                   </button>
                 )}
+                {modelData && modelData.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowModelMenu(p => !p)}
+                    className={`p-2 rounded-full transition-colors ${selectedModel ? 'text-[var(--color-primary)] bg-[var(--color-primary-light)]' : 'text-gray-400 hover:text-[var(--color-navy)]'}`}
+                    title={
+                      selectedModel
+                        ? t('activeModel', { name: modelData.find(m => m.key === selectedModel)?.display_name ?? selectedModel })
+                        : t('modelPicker')
+                    }
+                  >
+                    <Cpu size={16} />
+                  </button>
+                )}
                 <VoiceChat onTranscript={handleTranscript} />
                 <button
                   type="submit"
@@ -691,6 +727,23 @@ export function ChatWindow() {
           {showPicker && (
             <div className="absolute bottom-20 left-4 z-50 shadow-xl rounded-[12px] overflow-hidden">
               <DocumentPicker onSelect={handleSelectDoc} onClose={() => setShowPicker(false)} />
+            </div>
+          )}
+          {showModelMenu && modelData && (
+            <div className="absolute bottom-20 right-4 z-50 shadow-xl rounded-[12px] overflow-hidden bg-white border border-[var(--color-border)] w-64 max-h-80 overflow-y-auto">
+              <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-gray-400">{t('modelPickerTitle')}</div>
+              {modelData.map(m => (
+                <button
+                  key={m.key}
+                  type="button"
+                  onClick={() => { setSelectedModel(m.default ? null : m.key); setShowModelMenu(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-gray-50"
+                >
+                  <span className="w-4">{((selectedModel === null && m.default) || selectedModel === m.key) && <Check size={14} className="text-[var(--color-primary)]" />}</span>
+                  <span className="truncate">{m.display_name}</span>
+                  {m.default && <span className="ml-auto text-[10px] text-gray-400">{t('modelDefaultTag')}</span>}
+                </button>
+              ))}
             </div>
           )}
           {showStyleMenu && styleData && (

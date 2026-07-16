@@ -50,7 +50,11 @@
     "styleNone": "No style",
     "stylePresets": "Presets",
     "styleMine": "My styles",
-    "styleDefaultTag": "default"
+    "styleDefaultTag": "default",
+    "modelPicker": "Choose AI model",
+    "modelPickerTitle": "AI model",
+    "modelDefaultTag": "default",
+    "activeModel": "Model: {name}"
   },
   "approval": {
     "title": "Review required",

@@ -1,13 +1,17 @@
-"""One-off: upload branding/Template_Keralty.pptx to Drive as a Google Slides
-template, probe its layouts, and empirically test slide creation per layout.
+"""One-off: upload the re-themed corporate PPTX templates to Drive as Google
+Slides templates, probe their layouts, and empirically test slide creation per
+layout — for ALL THREE templates (Keralty default + two Presidencia variants).
+
+Prerequisite: run scripts/retheme_templates.py first (writes the Keralty-
+palette + engine-font versions to branding/generated/ — the originals carry a
+stock Office theme that would leak Arial/Office colors into generated text).
 
 Run locally from backend/ with the venv:
     GOOGLE_CLOUD_PROJECT=keraltysandbox python scripts/upload_slides_template.py
 
 Uploads under the SANDBOX USER's OAuth creds (from Firestore) so the user owns
-the template and per-deck files().copy needs no sharing. Prints the
-SLIDES_TEMPLATE_ID to set on Cloud Run. Rerun with a new pptx (same steps)
-whenever branding changes — then update the env var.
+the templates and per-deck files().copy needs no sharing. Prints all three env
+vars + one combined gcloud command. Rerun whenever branding changes.
 """
 
 import sys
@@ -23,7 +27,18 @@ from services.drive import get_drive_service, DriveService
 from services.slides import SlidesService, get_slides_service
 
 USER = "sandboxkeralty@gmail.com"
-PPTX = os.path.join(os.path.dirname(__file__), "..", "..", "branding", "Template_Keralty.pptx")
+_GENERATED = os.path.join(os.path.dirname(__file__), "..", "..", "branding", "generated")
+
+# (env var name, display name, pptx path)
+TEMPLATES = [
+    ("SLIDES_TEMPLATE_ID", "Keralty Slides Template",
+     os.path.join(_GENERATED, "Template_Keralty.pptx")),
+    ("SLIDES_TEMPLATE_ID_PRESIDENCIA_CORP", "Keralty Presidencia Corporativo Template",
+     os.path.join(_GENERATED, "Template_Presidencia__Corporativo.pptx")),
+    ("SLIDES_TEMPLATE_ID_PRESIDENCIA_STD", "Keralty Presidencia Estandar Template",
+     os.path.join(_GENERATED, "Template_Presidencia__Estandar.pptx")),
+]
+
 SEMANTICS = ["cover", "section", "content", "two_column", "title_only", "quote", "big_number", "closing"]
 
 TEST_SPECS = {
@@ -39,18 +54,17 @@ TEST_SPECS = {
 }
 
 
-def main():
-    creds = credentials_from_dict(FirestoreService.get_user_credentials(USER))
+def provision_template(display_name: str, pptx_path: str, creds) -> str:
     drive = get_drive_service(creds)
 
-    print(f"Uploading {os.path.abspath(PPTX)} with conversion…")
+    print(f"\n{'='*70}\nUploading {os.path.abspath(pptx_path)} with conversion…")
     media = MediaFileUpload(
-        PPTX,
+        pptx_path,
         mimetype="application/vnd.openxmlformats-officedocument.presentationml.presentation",
         resumable=True,
     )
     file = drive.files().create(
-        body={"name": "Keralty Slides Template",
+        body={"name": display_name,
               "mimeType": "application/vnd.google-apps.presentation"},
         media_body=media, fields="id",
     ).execute()
@@ -99,10 +113,20 @@ def main():
             print(f"  {s:<11} FAIL — {e}")
     drive.files().delete(fileId=scratch).execute()
     print("Scratch copy deleted.")
+    return tid
 
-    print(f"\nSLIDES_TEMPLATE_ID={tid}")
-    print("Set it on Cloud Run:\n  gcloud run services update keralty-agent-backend "
-          f"--update-env-vars SLIDES_TEMPLATE_ID={tid} "
+
+def main():
+    creds = credentials_from_dict(FirestoreService.get_user_credentials(USER))
+    env_pairs = []
+    for env_var, display_name, pptx_path in TEMPLATES:
+        tid = provision_template(display_name, pptx_path, creds)
+        env_pairs.append(f"{env_var}={tid}")
+        print(f"{env_var}={tid}")
+
+    print(f"\n{'='*70}\nAll templates provisioned. Set on Cloud Run:\n"
+          "  gcloud run services update keralty-agent-backend "
+          f"--update-env-vars \"{','.join(env_pairs)}\" "
           "--region us-central1 --project keraltysandbox --quiet")
 
 

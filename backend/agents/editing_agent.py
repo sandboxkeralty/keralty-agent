@@ -1,4 +1,5 @@
 from google.adk.agents import Agent
+from services.brand import BRAND_INSTRUCTION_BLOCK
 from tools.docs_tools import docs_get, docs_update
 from tools.approval_tools import approval_create
 from tools.sheets_tools import (
@@ -153,16 +154,25 @@ las fuentes al final en una sección "Referencias"; en correos y mensajes se omi
   no coincide con "Digital_Twins.pdf", pero "Digital" sí) antes de decir que no existe; si
   hay varias coincidencias, lista las opciones y pregunta cuál.
 
+""" + BRAND_INSTRUCTION_BLOCK + """
 {writing_style?}
 {signature?}
 """
 
-editing_agent = Agent(
-    name="EditingAgent",
-    model=settings.GEMINI_FLASH_MODEL,
-    instruction=INSTRUCTION,
-    description="Edits existing Google Docs and Sheets with user approval.",
-    tools=[docs_get, docs_update, approval_create, drive_search, sheets_list_tabs,
-           read_spreadsheet_range, update_spreadsheet_values, append_spreadsheet_values,
-           sheets_add_tab, sheets_rename_tab, sheets_delete_tab]
-)
+def build_agent(model=None):
+    """Constructs a fresh agent instance. model=None keeps the Gemini
+    default; pass a LiteLlm instance (or model string) for other providers.
+    Fresh instances per call — ADK agents are single-parent, so trees for
+    different models must never share sub-agent objects."""
+    return Agent(
+        name="EditingAgent",
+        model=model or settings.GEMINI_FLASH_MODEL,
+        instruction=INSTRUCTION,
+        description="Edits existing Google Docs and Sheets with user approval.",
+        tools=[docs_get, docs_update, approval_create, drive_search, sheets_list_tabs,
+               read_spreadsheet_range, update_spreadsheet_values, append_spreadsheet_values,
+               sheets_add_tab, sheets_rename_tab, sheets_delete_tab]
+    )
+
+
+editing_agent = build_agent()

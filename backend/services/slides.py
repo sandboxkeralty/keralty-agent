@@ -18,7 +18,11 @@ SLIDE_W = 9_144_000
 SLIDE_H = 5_143_500
 
 # Brand accents (current branding — see branding/ and CLAUDE.md).
-NAVY = {'red': 0.0, 'green': 0.125, 'blue': 0.376}   # #002060
+from services import brand
+
+# Brand primary (Pantone 287C #002F87 — from the brand manual; replaces the
+# off-brand #002060 that was eyeballed from the old template).
+NAVY = brand.slides_rgb(brand.PRIMARY_BLUE)
 WHITE = {'red': 1.0, 'green': 1.0, 'blue': 1.0}
 
 # Image placement presets as FRACTIONS of the actual page size. All are exact
@@ -66,18 +70,37 @@ def _hex_to_rgb(hex_color: str) -> dict:
     }
 
 
+# Corporate template registry: semantic key -> Google Slides file id (set by
+# scripts/upload_slides_template.py). Unknown/empty keys fall back to the
+# default Keralty template, then to a blank deck (existing failure path).
+def _template_ids() -> dict:
+    return {
+        'keralty': settings.SLIDES_TEMPLATE_ID,
+        'presidencia_corporativo': settings.SLIDES_TEMPLATE_ID_PRESIDENCIA_CORP,
+        'presidencia_estandar': settings.SLIDES_TEMPLATE_ID_PRESIDENCIA_STD,
+    }
+
+
+def resolve_template_id(template_key: str = None) -> str:
+    ids = _template_ids()
+    tid = ids.get((template_key or 'keralty').strip().lower())
+    return tid or ids['keralty']
+
+
 class SlidesService:
     @staticmethod
-    def create_presentation(title: str, credentials=None) -> str:
-        """Creates a deck. When SLIDES_TEMPLATE_ID is set, copies the corporate
-        template (inheriting its master/theme: fonts, colors, backgrounds) and
+    def create_presentation(title: str, credentials=None, template_key: str = 'keralty') -> str:
+        """Creates a deck. When a corporate template id is configured for
+        template_key (keralty | presidencia_corporativo | presidencia_estandar),
+        copies it (inheriting its master/theme: fonts, colors, backgrounds) and
         deletes its stock slides so the caller starts from an empty themed deck.
         Any template failure falls back loudly to a blank default-themed deck —
         a deck must always be produced."""
-        if settings.SLIDES_TEMPLATE_ID:
+        template_id = resolve_template_id(template_key)
+        if template_id:
             try:
                 from services.drive import DriveService
-                pid = DriveService.copy_file(settings.SLIDES_TEMPLATE_ID, title, credentials)
+                pid = DriveService.copy_file(template_id, title, credentials)
                 service = get_slides_service(credentials)
                 pres = service.presentations().get(
                     presentationId=pid, fields='slides(objectId)'
@@ -92,7 +115,7 @@ class SlidesService:
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-                print(f"[slides] TEMPLATE COPY FAILED ({settings.SLIDES_TEMPLATE_ID}): {e} "
+                print(f"[slides] TEMPLATE COPY FAILED ({template_id}): {e} "
                       f"— falling back to blank deck", flush=True)
         service = get_slides_service(credentials)
         presentation = service.presentations().create(body={'title': title}).execute()
@@ -357,6 +380,32 @@ class SlidesService:
                 requests.append({'updatePageElementsZOrder': {
                     'pageElementObjectIds': [image_id], 'operation': 'SEND_TO_BACK'}})
 
+        # -- corporate logo on cover/closing (brand manual §3.9/3.10) ---------
+        # Only the pre-rendered authorized PNGs, never generated/recolored.
+        # White (Blanco) lockup over hero images or corporate-blue backgrounds;
+        # blue (Azul) on white. Created AFTER the hero z-order requests so the
+        # logo paints on top. Rides the same createImage retry-strip ladder as
+        # content images — a bad logo URL can never kill the slide.
+        if layout in ('cover', 'closing') and settings.BRAND_LOGOS_ENABLED:
+            bg = str(spec.get('background_color') or '').lower()
+            dark_bg = hero or bg in (brand.PRIMARY_BLUE.lower(), brand.DARK_BLUE.lower())
+            logo_url = brand.logo_for_background('dark' if dark_bg else 'white')
+            logo_w = int(0.14 * page_w)                    # well above the manual's minimum
+            logo_h = int(logo_w / brand.LOGO_ASPECT)
+            inset = int(0.03 * page_w)                     # clear-space margin
+            requests.append({'createImage': {
+                'objectId': f'logo_{uuid.uuid4().hex[:10]}',
+                'url': logo_url,
+                'elementProperties': {
+                    'pageObjectId': slide_id,
+                    'size': {'width': {'magnitude': logo_w, 'unit': 'EMU'},
+                             'height': {'magnitude': logo_h, 'unit': 'EMU'}},
+                    'transform': {'scaleX': 1, 'scaleY': 1,
+                                  'translateX': page_w - logo_w - inset,
+                                  'translateY': page_h - logo_h - inset, 'unit': 'EMU'},
+                },
+            }})
+
         # -- composite layouts: quote / big_number (page-fraction boxes) ------
         if layout == 'quote':
             manual_boxes.append((f'“{spec.get("quote", title)}”',
@@ -382,6 +431,10 @@ class SlidesService:
                                      'fontSize', 'CENTER'))
 
         for text, fx, fy, fw, fh, style, fields, align in manual_boxes:
+            # Manual TEXT_BOXes don't inherit the template theme font — set the
+            # brand engine font explicitly so they match the re-themed layouts.
+            style = {**style, 'fontFamily': brand.ENGINE_FONT}
+            fields = f'{fields},fontFamily'
             box_id = f'box_{uuid.uuid4().hex[:10]}'
             requests.append({'createShape': {
                 'objectId': box_id, 'shapeType': 'TEXT_BOX',

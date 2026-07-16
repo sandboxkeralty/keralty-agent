@@ -103,6 +103,8 @@ User message → POST /api/chat (SSE stream)
 
 All agents live in `backend/agents/`. The orchestrator's `INSTRUCTION` block in `orchestrator.py` contains the routing rules — **edit this when adding capabilities or fixing misdirected requests**.
 
+**Multi-LLM chat (July 2026): the user picks the chat model per conversation** (Cpu icon in the composer, options from `GET /api/models`). Every `agents/*.py` exposes `build_agent(model=None)` and `orchestrator.py` exposes `build_agent_tree(model=None)`; `agents/runner.py` is a **Runner-per-model factory** (`get_runner(model_key)`, lazy cache) — ADK has no per-request model override, so model selection = runner selection. All runners share ONE `FirestoreSessionService` and `app_name="agents"`, so a conversation keeps its history across mid-conversation model switches (verified live). The registry (`services/model_registry.py`) maps stable picker keys (`gemini` default, `claude-fable/opus/sonnet/haiku`, `openai-sol/terra/luna/gpt55`) to config-driven provider ids (OpenAI ids probed live July 2026: `gpt-5.6-sol/-terra/-luna`, `gpt-5.5`; image model `gpt-image-2`); a provider's models appear ONLY when its API key env var is set (`ANTHROPIC_API_KEY`/`OPENAI_API_KEY` — LiteLLM reads them from os.environ), and unknown/unavailable keys fall back to Gemini with a warning, never an error. Non-Gemini trees run through `LiteLlm` (litellm + openai pinned in requirements; **orjson pin is load-bearing** — litellm fails at call time without it). **`_web_search_agent` is pinned to Gemini in every tree** (the built-in `google_search` tool is Gemini-exclusive). `image_generate` reads `tool_context.state["model_provider"]` (written per-turn by chat.py like writing_style): OpenAI conversations generate via the OpenAI images API with Imagen fallback; Claude/Gemini use Imagen. Utility calls (RAG, email services, TTS, voice, news, style analysis) stay on Gemini regardless of the picker. The **LiteLLM/ADK-2.3.0 spike** (`scripts/spike_litellm_adk.py`, run in the prod container) verified transfer_to_agent + custom tools + `{writing_style?}` templating + streaming all work on non-Gemini models — rerun it before ADK upgrades. `_is_quota_error` also matches litellm `RateLimitError` shapes. Frontend: selection lives in `useChatSession` (per-conversation, `sessionStorage["keralty_model:<sid>"]`, reset on new conversation); the picker button renders only when >1 model is available.
+
 **Model tiers are deliberate**: only AnalysisAgent and WritingAgent run `gemini-2.5-pro` (multi-document reasoning and long-form executive drafting, where Flash visibly degrades). VisualAgent and EmailAgent were downgraded to Flash in July 2026 — their outputs (slide outlines, short email drafts) don't need Pro, and Pro was the model hitting Vertex quota (429) daily. Don't bump an agent back to Pro without checking the quota picture first.
 
 **Vertex 429 (`RESOURCE_EXHAUSTED`) defense — four stacked layers, all real and load-bearing:**
@@ -311,7 +313,7 @@ Ingestion endpoint: `POST /knowledge/documents` (50 MB limit, admin-gated). Mana
 - `resolve_layouts(presentation_id)` — classifies the deck's layouts into semantic names (cover/section/content/two_column/title_only/blank) by **placeholder inventory**, not layout name (converted PPTX layouts often report CUSTOM names; the Keralty template happens to keep enum names, but don't rely on that). Resolved once per deck build.
 - `add_designed_slide(presentation_id, spec, layout_map)` — outline **schema v2**: `{layout, title, subtitle, bullets|body, columns, quote+attribution, number+caption, image_url+image_placement, speaker_notes, background_color}`. Layouts: cover, section, content, two_column, title_only, quote, big_number (the latter two are composites: BLANK/template-blank + styled TEXT_BOX shapes, 96pt bold number / 28pt italic quote), closing (renders as section). `placeholderIdMappings` are built ONLY from placeholders the resolver confirmed exist — mapping a nonexistent placeholder 400s the whole batch. Failure ladder: template layoutId → predefinedLayout → **retry without the createImage request** (a bad image URL fails the whole batch; the slide keeps its layout and just loses the image) → BLANK + text boxes (always produces a slide).
 - **Geometry is computed from the deck's REAL page size, never hardcoded.** Template copies are PPTX-sized (12,192,000×6,858,000 EMU), not Google's default 9,144,000×5,143,500 — hardcoding the default shipped "full-bleed" images covering ~75% of the slide and off-center number slides. `resolve_layouts` returns the page under `layout_map["_page"]`; placement presets (`_PLACEMENT_FRACTIONS`: `full_bleed`, `right_half`, `left_half`, `centered`) and all manual text boxes are fractions of that. No banner/strip preset: `cropProperties` is read-only in the Slides API.
-- **Hero treatment for full-bleed images with a title**: page elements paint in creation order, so an image created after the slide's placeholders hides the title. `add_designed_slide` composes: image → full-page navy scrim (`alpha 0.45`) → `updatePageElementsZOrder SEND_TO_BACK` scrim then image (leaving image at the very back, scrim above it, text on top) → title/subtitle restyled white bold. Non-hero titles get brand-navy bold (`#002060`), multi-line BODY fills get `createParagraphBullets` — the converted template's content layouts are plain black Calibri with no list styling of their own.
+- **Hero treatment for full-bleed images with a title**: page elements paint in creation order, so an image created after the slide's placeholders hides the title. `add_designed_slide` composes: image → full-page navy scrim (`alpha 0.45`) → `updatePageElementsZOrder SEND_TO_BACK` scrim then image (leaving image at the very back, scrim above it, text on top) → title/subtitle restyled white bold. Non-hero titles get brand-navy bold (`#002F87` via `services/brand.py` — the manual's Pantone 287C; the old eyeballed `#002060` was off-brand and is gone repo-wide), multi-line BODY fills get `createParagraphBullets` — the converted template's content layouts are plain black with no list styling of their own.
 - **Visual validation is part of the workflow** (adopted from the user's pptx SKILL.md reference): after any engine change, build a demo deck and actually LOOK at `presentations().pages().getThumbnail` renders of every slide — checking text cutoff, overlap, contrast, and placement. The first version of this engine shipped API-green but visually broken (images over titles, 75%-bleed) precisely because nothing looked at the render.
 - `add_slide_with_content` / `create_slide` kept untouched for back-compat (v1 outlines).
 
@@ -560,22 +562,43 @@ Frontend uses `next-intl` with locales `en` and `es` (default `es`). Message fil
 
 ---
 
-## Branding
+## Branding (July 2026 — full brand-system integration)
 
-`branding/` holds the source-of-truth brand assets — `Paleta de colores Keralty.xlsx` (official
-Pantone-mapped hex palette), `Template_Keralty.pptx` (the executive presentation template; its
-body font, Calibri, and its dominant navy, `#002060`, are what the frontend's brand colors and
-typography are actually derived from — not the palette xlsx alone, which uses slightly different
-navy shades), and `logo.png` (transparent PNG, dark navy wordmark — copied to
-`frontend/public/keralty-logo.png` for actual use).
+**`backend/services/brand.py` is the single source of truth**, distilled from
+`branding/Manual Keralty (020518).pdf` (67pp, v03-2018) + the palette xlsx: full Pantone
+palette (PRIMARY_BLUE `#002F87` 287C, DARK_BLUE `#002E58`, SECONDARY_BLUE `#0071A3`, gradient
+blues, greens incl. `#00B288` 339C, warm grey), `LOGO_URLS` (authorized logos hosted public on
+GCS `logos/` — Azul/Blanco/Color × Horizontal/Vertical, uploaded by
+`scripts/upload_brand_logos.py`; Grises/Negro deliberately not hosted, the manual only allows
+white/corporate-blue backgrounds), `logo_for_background()` (Blanco on dark/hero, Azul on
+white), `BRAND_INSTRUCTION_BLOCK` (appended to Visual/Writing/Editing agent instructions —
+"Keralty" bold in text, never inline logos, tone rules; contains NO bare `{tokens}`),
+`IMAGE_STYLE_DIRECTIVE` (consumed by `image_tools._enrich_prompt` — replaced the old vague
+"teal/navy" mood), `EMAIL_FONT_STACK` (digest HTML). **The old repo-wide navy `#002060` was
+OFF-BRAND (eyeballed from the template) — corrected everywhere to `#002F87`** (slides.py NAVY,
+globals.css `--color-navy`).
 
-`frontend/app/globals.css`'s `@theme` block holds the applied brand colors
-(`--color-primary: #00B288`, `--color-navy: #002060`, etc.) — **check this file's comments and
-`branding/` before changing any brand color**, don't eyeball a replacement. The body font is
-Carlito (`app/[locale]/layout.tsx`, loaded via `next/font/google`), a freely-licensed
-metric-compatible match for Calibri — the CSS previously declared `font-family: 'Inter'` but
-never actually loaded that font anywhere, so it silently fell back to `system-ui`; this is now
-fixed and wired correctly.
+**Three corporate Slides templates** (all re-themed by `scripts/retheme_templates.py` —
+the shipped PPTX carry a STOCK Office theme (Arial + Office accents), so the script
+zip-rewrites `ppt/theme/*.xml` with the Keralty color scheme + engine font into
+`branding/generated/` before provisioning): `SLIDES_TEMPLATE_ID` (Keralty default),
+`SLIDES_TEMPLATE_ID_PRESIDENCIA_CORP`, `SLIDES_TEMPLATE_ID_PRESIDENCIA_STD` env vars;
+`slides.py::resolve_template_id` maps keys keralty/presidencia_corporativo/presidencia_estandar
+(unknown→keralty→blank). `slides_create(..., template=)` exposes the choice; VisualAgent's
+`# PLANTILLAS CORPORATIVAS` block infers from wording (explicit user mention wins;
+"presidencia" alone → corporativo; "estándar" must be explicit; default keralty — product
+decisions, July 2026). `upload_slides_template.py` now provisions all three (loop + combined
+gcloud command). Cover/closing slides get an automatic corner logo (`BRAND_LOGOS_ENABLED`,
+colorway by background, rides the createImage retry-strip ladder). Docs: `docs_create(...,
+include_logo=True)` → `DocsService.insert_logo_header` (on-request/formal docs only — product
+decision). Verified live: chat "presentación para presidencia" → corporativo template + brand
+title color + Azul logo (thumbnails checked).
+
+**Fonts — honest limitation**: the corporate typeface is FF Clan Pro (`branding/fonts_keralty/`,
+commercial FontFont) but **Google Slides/Docs APIs cannot render custom fonts** (Google Fonts
+catalog only). `BRAND_ENGINE_FONT` (default "Archivo") is the stand-in baked into the re-themed
+masters and set on composite TEXT_BOXes; Clan Pro remains the documented font for humans
+editing/exporting offline. Frontend body font stays Carlito (`app/[locale]/layout.tsx`).
 
 The logo is displayed in the sidebar header on a **white badge**, not directly against the
 sidebar's dark navy background — its wordmark is dark navy too, so it would be illegible without

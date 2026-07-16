@@ -152,10 +152,18 @@ correos y mensajes se omiten por completo.
 {signature?}
 """
 
-knowledge_agent = Agent(
-    name="KnowledgeAgent",
-    model=settings.GEMINI_FLASH_MODEL,
-    instruction=INSTRUCTION,
-    description="Corporate Knowledge Base agent for Keralty organization.",
-    tools=[kb_search, kb_get_person, kb_get_department, kb_get_org_chart, kb_get_policy]
-)
+def build_agent(model=None):
+    """Constructs a fresh agent instance. model=None keeps the Gemini
+    default; pass a LiteLlm instance (or model string) for other providers.
+    Fresh instances per call — ADK agents are single-parent, so trees for
+    different models must never share sub-agent objects."""
+    return Agent(
+        name="KnowledgeAgent",
+        model=model or settings.GEMINI_FLASH_MODEL,
+        instruction=INSTRUCTION,
+        description="Corporate Knowledge Base agent for Keralty organization.",
+        tools=[kb_search, kb_get_person, kb_get_department, kb_get_org_chart, kb_get_policy]
+    )
+
+
+knowledge_agent = build_agent()

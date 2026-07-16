@@ -10,7 +10,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional
 from google.genai import types
-from agents.runner import runner
 from services.firestore import FirestoreService
 from models.schemas import SessionInDB, MessageInDB
 
@@ -81,10 +80,12 @@ def _is_english(text: str) -> bool:
 
 def _is_quota_error(e: Exception) -> bool:
     # Vertex 429s surface through ADK as e.g. `_ResourceExhaustedError` with
-    # "429 RESOURCE_EXHAUSTED" in the message — match on both, since the
-    # concrete exception class is private to google-genai internals.
+    # "429 RESOURCE_EXHAUSTED" in the message; LiteLLM (Claude/OpenAI models)
+    # raises litellm.RateLimitError — match by name/message, never by import
+    # (the class set is provider-internal and litellm is an optional dep).
     s = f"{type(e).__name__} {e}"
-    return "RESOURCE_EXHAUSTED" in s or "ResourceExhausted" in s or "429" in s
+    return ("RESOURCE_EXHAUSTED" in s or "ResourceExhausted" in s or "429" in s
+            or "RateLimitError" in s or "rate_limit" in s.lower().replace(" ", "_"))
 
 class AttachedFile(BaseModel):
     text: str = ""
@@ -114,6 +115,10 @@ class ChatRequest(BaseModel):
     # Active writing style: absent/None → the user's saved default; the literal
     # "none" → explicitly no style; otherwise a preset:* id or a custom style id.
     style_id: Optional[str] = None
+    # Chat model (registry key from GET /api/models, e.g. "claude-sonnet").
+    # Absent/unknown/unavailable → the Gemini default. Selects which per-model
+    # Runner handles the turn; history is shared across switches.
+    model: Optional[str] = None
     # Legacy single-attachment fields — kept so an older cached frontend build
     # keeps working; normalized into attached_files in the endpoint.
     attached_context: Optional[str] = None
@@ -172,18 +177,27 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                 print(f"[chat] signature resolution failed: {sig_err}", flush=True)
                 signature_note = ""
 
+            # Selected chat model → which per-model Runner handles this turn.
+            # All runners share one session service + app_name, so history and
+            # state follow the conversation across model switches.
+            from services.model_registry import get_spec
+            from agents.runner import get_runner
+            spec = get_spec(body.model)
+            active_runner = get_runner(spec.key)
+
             try:
-                session = await runner.session_service.get_session(
+                session = await active_runner.session_service.get_session(
                     app_name="agents",
                     session_id=body.session_id,
                     user_id=user_id,
                 )
                 if session is None:
                     init_state = {"user_id": user_id, "writing_style": style_block,
-                                  "signature": signature_note}
+                                  "signature": signature_note,
+                                  "model_key": spec.key, "model_provider": spec.provider}
                     if creds_dict:
                         init_state["google_credentials"] = creds_dict
-                    await runner.session_service.create_session(
+                    await active_runner.session_service.create_session(
                         app_name="agents",
                         user_id=user_id,
                         session_id=body.session_id,
@@ -231,11 +245,14 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
                 # get_session returns a deepcopy, so mutating it here would
                 # never reach the session the Runner actually reads.
                 if session:
-                    await runner.session_service.update_state(
+                    await active_runner.session_service.update_state(
                         app_name="agents",
                         user_id=user_id,
                         session_id=body.session_id,
-                        delta={"writing_style": style_block, "signature": signature_note},
+                        delta={"writing_style": style_block, "signature": signature_note,
+                               # Per-turn: tools read the provider from state
+                               # (image_generate picks Imagen vs OpenAI images).
+                               "model_key": spec.key, "model_provider": spec.provider},
                     )
             except Exception as e:
                 print(f"Session error: {e}")
@@ -336,7 +353,7 @@ async def chat_endpoint(body: ChatRequest, http_request: FastAPIRequest):
             # — an accepted tradeoff for self-healing the common case.
             for attempt in range(1, _MAX_QUOTA_ATTEMPTS + 1):
                 try:
-                    async for event in runner.run_async(
+                    async for event in active_runner.run_async(
                         new_message=types.Content(role="user", parts=message_parts),
                         session_id=body.session_id,
                         user_id=user_id,

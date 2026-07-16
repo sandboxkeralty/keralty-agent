@@ -3,6 +3,11 @@
 # the auto-injected transfer_to_agent tool), so a floating ADK version could
 # silently change agent-routing behavior — keep these pinned and bump deliberately.
 google-adk==2.3.0
+# Multi-LLM chat: LiteLLM powers ADK's non-Gemini model path (Claude/OpenAI
+# agent trees); openai is used directly for the OpenAI images API.
+litellm==1.92.0
+openai==2.45.0
+orjson==3.11.9  # litellm runtime dep it doesn't declare (fails at call time without it)
 fastapi==0.139.0
 uvicorn[standard]==0.50.2
 google-cloud-firestore==2.28.0

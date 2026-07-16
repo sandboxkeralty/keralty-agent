@@ -106,21 +106,32 @@ fuentes al final en una sección "Referencias"; en correos y mensajes se omiten 
 {signature?}
 """
 
-_web_search_agent = Agent(
-    name="WebSearchAgent",
-    model=settings.GEMINI_FLASH_MODEL,
-    instruction="Busca en la web pública información relevante a la consulta recibida. "
-                "Devuelve los hallazgos con URL, título, dominio y un fragmento relevante de cada fuente. "
-                "Responde SIEMPRE en el mismo idioma de la consulta recibida (si la consulta "
-                "está en inglés, responde en inglés), sin importar el idioma de las fuentes.",
-    description="Searches the public web for external information using Google Search.",
-    tools=[google_search],
-)
+def build_agent(model=None):
+    """Constructs a fresh ResearchAgent. model=None keeps the Gemini default;
+    pass a LiteLlm instance (or model string) for other providers.
 
-research_agent = Agent(
-    name="ResearchAgent",
-    model=settings.GEMINI_FLASH_MODEL,
-    instruction=INSTRUCTION,
-    description="Researches information using web search and internal Drive documents.",
-    tools=[drive_search, drive_read, AgentTool(agent=_web_search_agent)]
-)
+    The inner WebSearchAgent is ALWAYS pinned to Gemini regardless of the
+    passed model: its only tool is ADK's built-in google_search, which is a
+    Gemini-exclusive grounding tool — Claude/OpenAI models cannot invoke it.
+    Fresh instances per call — ADK agents are single-parent, so trees for
+    different models must never share sub-agent objects."""
+    web_search_agent = Agent(
+        name="WebSearchAgent",
+        model=settings.GEMINI_FLASH_MODEL,  # pinned — google_search is Gemini-only
+        instruction="Busca en la web pública información relevante a la consulta recibida. "
+                    "Devuelve los hallazgos con URL, título, dominio y un fragmento relevante de cada fuente. "
+                    "Responde SIEMPRE en el mismo idioma de la consulta recibida (si la consulta "
+                    "está en inglés, responde en inglés), sin importar el idioma de las fuentes.",
+        description="Searches the public web for external information using Google Search.",
+        tools=[google_search],
+    )
+    return Agent(
+        name="ResearchAgent",
+        model=model or settings.GEMINI_FLASH_MODEL,
+        instruction=INSTRUCTION,
+        description="Researches information using web search and internal Drive documents.",
+        tools=[drive_search, drive_read, AgentTool(agent=web_search_agent)]
+    )
+
+
+research_agent = build_agent()

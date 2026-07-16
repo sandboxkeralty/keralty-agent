@@ -23,14 +23,19 @@ async def slides_create(
     title: str,
     tool_context: ToolContext,
     outline: Optional[str] = None,
+    template: Optional[str] = None,
 ) -> dict:
     """Creates a themed Google Slides presentation from a designed outline.
 
-    The deck is created from the corporate template (inheriting its fonts,
+    The deck is created from a corporate template (inheriting its fonts,
     colors and backgrounds) when one is configured.
 
     Args:
         title: Presentation title.
+        template: Which corporate template to start from — "keralty" (default,
+            general executive deck), "presidencia_corporativo" (formal
+            Presidencia deck), or "presidencia_estandar" (content-richer
+            Presidencia variant). Invalid/omitted values use "keralty".
         outline: JSON array of slide spec objects. Each spec supports:
             layout: "cover" | "section" | "content" | "two_column" |
                     "title_only" | "quote" | "big_number" | "closing"
@@ -55,7 +60,8 @@ async def slides_create(
     """
     try:
         creds = _credentials(tool_context)
-        presentation_id = SlidesService.create_presentation(title, credentials=creds)
+        presentation_id = SlidesService.create_presentation(
+            title, credentials=creds, template_key=template or "keralty")
         url = f"https://docs.google.com/presentation/d/{presentation_id}/edit"
 
         created_slides = []

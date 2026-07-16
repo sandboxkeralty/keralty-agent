@@ -116,10 +116,18 @@ omiten por completo.
 {signature?}
 """
 
-analysis_agent = Agent(
-    name="AnalysisAgent",
-    model=settings.GEMINI_PRO_MODEL,
-    instruction=INSTRUCTION,
-    description="Analyzes internal documents to answer questions, generate summaries, and extract structured data.",
-    tools=[drive_read, drive_search, context_inject, rag_retrieve, sheets_list_tabs, read_spreadsheet_range]
-)
+def build_agent(model=None):
+    """Constructs a fresh agent instance. model=None keeps the Gemini
+    default; pass a LiteLlm instance (or model string) for other providers.
+    Fresh instances per call — ADK agents are single-parent, so trees for
+    different models must never share sub-agent objects."""
+    return Agent(
+        name="AnalysisAgent",
+        model=model or settings.GEMINI_PRO_MODEL,
+        instruction=INSTRUCTION,
+        description="Analyzes internal documents to answer questions, generate summaries, and extract structured data.",
+        tools=[drive_read, drive_search, context_inject, rag_retrieve, sheets_list_tabs, read_spreadsheet_range]
+    )
+
+
+analysis_agent = build_agent()

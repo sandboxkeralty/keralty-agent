@@ -1,12 +1,6 @@
 from google.adk.agents import Agent
-from agents.analysis_agent import analysis_agent
-from agents.research_agent import research_agent
-from agents.writing_agent import writing_agent
-from agents.editing_agent import editing_agent
-from agents.review_agent import review_agent
-from agents.visual_agent import visual_agent
-from agents.email_agent import email_agent
-from agents.knowledge_agent import knowledge_agent
+from agents import (analysis_agent, research_agent, writing_agent, editing_agent,
+                    review_agent, visual_agent, email_agent, knowledge_agent)
 from config import settings
 
 INSTRUCTION = """
@@ -137,19 +131,33 @@ en una sección "Referencias"; en correos y mensajes se omiten por completo.
 {signature?}
 """
 
-orchestrator_agent = Agent(
-    name="OrchestratorAgent",
-    model=settings.GEMINI_FLASH_MODEL,
-    instruction=INSTRUCTION,
-    description="Agent root that delegates tasks to specialized sub-agents based on the user's intent.",
-    sub_agents=[
-        analysis_agent,
-        research_agent,
-        writing_agent,
-        editing_agent,
-        review_agent,
-        visual_agent,
-        email_agent,
-        knowledge_agent
-    ]
-)
+def build_agent_tree(model=None):
+    """Constructs a COMPLETE fresh agent tree (orchestrator + 8 sub-agents).
+
+    model=None keeps the current Gemini defaults (flash/pro tiers per agent);
+    a LiteLlm instance (or model string) puts the WHOLE tree on that model —
+    except WebSearchAgent inside ResearchAgent, which stays pinned to Gemini
+    (its google_search tool is Gemini-exclusive; see research_agent.py).
+
+    Fresh instances per call are mandatory: ADK agents are single-parent, so
+    the per-model Runner trees (agents/runner.py) can never share sub-agents.
+    """
+    return Agent(
+        name="OrchestratorAgent",
+        model=model or settings.GEMINI_FLASH_MODEL,
+        instruction=INSTRUCTION,
+        description="Agent root that delegates tasks to specialized sub-agents based on the user's intent.",
+        sub_agents=[
+            analysis_agent.build_agent(model),
+            research_agent.build_agent(model),
+            writing_agent.build_agent(model),
+            editing_agent.build_agent(model),
+            review_agent.build_agent(model),
+            visual_agent.build_agent(model),
+            email_agent.build_agent(model),
+            knowledge_agent.build_agent(model),
+        ]
+    )
+
+
+orchestrator_agent = build_agent_tree()

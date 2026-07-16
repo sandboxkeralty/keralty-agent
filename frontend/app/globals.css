@@ -2,12 +2,12 @@
 
 @theme {
   /* Keralty brand palette — from branding/Paleta de colores Keralty.xlsx
-     and the navy used throughout branding/Template_Keralty.pptx (#002060). */
+     and the brand manual's primary corporate blue, Pantone 287C (#002F87). */
   --color-primary: #00B288;        /* Pantone 339C */
   --color-primary-dark: #007D5F;
   --color-primary-light: #E5F7F4;
 
-  --color-navy: #002060;           /* matches Template_Keralty.pptx headings */
+  --color-navy: #002F87;           /* Pantone 287C — brand manual primary blue */
   --color-navy-dark: #001848;
   --color-navy-light: #E8EEF7;
 

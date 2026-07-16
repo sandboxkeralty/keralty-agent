@@ -4,6 +4,7 @@ from typing import Optional
 
 from google.adk.tools import ToolContext
 from config import settings
+from services import brand
 
 # Tried in order after the configured model; ends at the model probed working
 # on keraltysandbox (July 2026: imagen-4.0-* and 3.0-002 return 404 there, but
@@ -34,9 +35,10 @@ def _enrich_prompt(subject: str) -> str:
                 "Rewrite the following subject as ONE single English image-generation "
                 "prompt for premium corporate healthcare imagery. Include: the subject, "
                 "a concrete composition (camera angle or framing), lighting (soft, "
-                "natural or studio), color mood (warm teal, white and navy corporate "
-                "palette), and a style (professional editorial photography OR clean "
+                "natural or studio), the brand color mood and photography premises "
+                "below, and a style (professional editorial photography OR clean "
                 "modern flat illustration — pick whichever suits the subject). "
+                f"{brand.IMAGE_STYLE_DIRECTIVE} "
                 "End the prompt with: 'no text, no logos, no watermarks, no "
                 "identifiable faces'. Output ONLY the prompt, nothing else.\n\n"
                 f"Subject: {subject}"
@@ -56,8 +58,33 @@ def _enrich_prompt(subject: str) -> str:
         return subject
 
 
+def _generate_openai_image(enriched_prompt: str) -> bytes:
+    """OpenAI images API path — used when the conversation's selected chat
+    model is an OpenAI one (product decision). Raises on any failure; the
+    caller falls back to the Imagen path so an OpenAI outage never costs the
+    user their image."""
+    import base64
+    from openai import OpenAI
+
+    client = OpenAI(api_key=settings.OPENAI_API_KEY)
+    result = client.images.generate(
+        model=settings.OPENAI_IMAGE_MODEL,
+        prompt=enriched_prompt,
+        size="1536x1024",  # closest available to the 16:9 house format
+        n=1,
+    )
+    b64 = result.data[0].b64_json
+    if not b64:
+        raise RuntimeError("OpenAI images returned no b64_json payload")
+    return base64.b64decode(b64)
+
+
 async def image_generate(prompt: str, tool_context: ToolContext = None) -> dict:
-    """Generates a 16:9 corporate image with Vertex AI Imagen and uploads it to GCS.
+    """Generates a 16:9 corporate image and uploads it to GCS.
+
+    Engine: Vertex AI Imagen by default; the OpenAI images API when the
+    conversation's selected chat model is an OpenAI one (read from session
+    state — never a tool argument the model could get wrong).
 
     Args:
         prompt: Concise description of the image SUBJECT (one sentence is
@@ -82,6 +109,21 @@ async def image_generate(prompt: str, tool_context: ToolContext = None) -> dict:
 
         enriched = _enrich_prompt(prompt)
 
+        image_bytes = None
+        used_model = None
+
+        # OpenAI-selected conversations generate with OpenAI images; any
+        # failure falls through to the Imagen path below (never a dead turn).
+        state = getattr(tool_context, "state", {}) if tool_context else {}
+        if state.get("model_provider") == "openai" and settings.OPENAI_API_KEY:
+            try:
+                image_bytes = _generate_openai_image(enriched)
+                used_model = settings.OPENAI_IMAGE_MODEL
+            except Exception as oe:
+                traceback.print_exc()
+                print(f"[image_generate] OPENAI IMAGE FAILED: {oe} — falling back to Imagen",
+                      flush=True)
+
         candidates = [settings.IMAGEN_MODEL] + [
             m for m in _IMAGEN_FALLBACKS if m != settings.IMAGEN_MODEL
         ]
@@ -89,13 +131,11 @@ async def image_generate(prompt: str, tool_context: ToolContext = None) -> dict:
             candidates.remove(_working_model)
             candidates.insert(0, _working_model)
 
-        image_bytes = None
-        used_model = None
         last_err = None
         base = (f"https://{settings.GOOGLE_CLOUD_REGION}-aiplatform.googleapis.com/v1/"
                 f"projects/{settings.GOOGLE_CLOUD_PROJECT}/locations/{settings.GOOGLE_CLOUD_REGION}"
                 f"/publishers/google/models")
-        for m in candidates:
+        for m in candidates if image_bytes is None else []:
             resp = session.post(
                 f"{base}/{m}:predict",
                 json={"instances": [{"prompt": enriched}],

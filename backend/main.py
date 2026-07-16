@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from auth.auth_middleware import auth_middleware
-from routers import auth, documents, voice, history, admin, knowledge, chat, tasks, email, email_v2, hooks, tts, style, signatures, news, folders
+from routers import auth, documents, voice, history, admin, knowledge, chat, tasks, email, email_v2, hooks, models, tts, style, signatures, news, folders
 from config import settings
 from observability.tracing import setup_tracing
 
@@ -38,6 +38,7 @@ app.include_router(tasks.router)
 app.include_router(email.router)
 app.include_router(email_v2.router)
 app.include_router(hooks.router)
+app.include_router(models.router)
 app.include_router(tts.router)
 app.include_router(style.router)
 app.include_router(signatures.router)

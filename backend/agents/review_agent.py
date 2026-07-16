@@ -93,10 +93,18 @@ de un documento formal; en correos y mensajes no deben aparecer.
 {signature?}
 """
 
-review_agent = Agent(
-    name="ReviewAgent",
-    model=settings.GEMINI_FLASH_MODEL,
-    instruction=INSTRUCTION,
-    description="Reviews drafted documents for quality validation.",
-    tools=[drive_read, docs_get]
-)
+def build_agent(model=None):
+    """Constructs a fresh agent instance. model=None keeps the Gemini
+    default; pass a LiteLlm instance (or model string) for other providers.
+    Fresh instances per call — ADK agents are single-parent, so trees for
+    different models must never share sub-agent objects."""
+    return Agent(
+        name="ReviewAgent",
+        model=model or settings.GEMINI_FLASH_MODEL,
+        instruction=INSTRUCTION,
+        description="Reviews drafted documents for quality validation.",
+        tools=[drive_read, docs_get]
+    )
+
+
+review_agent = build_agent()

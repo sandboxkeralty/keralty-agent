@@ -83,6 +83,27 @@ class DocsService:
         return True
 
     @staticmethod
+    def insert_logo_header(document_id: str, credentials=None) -> bool:
+        """Inserts the authorized Keralty logo (Azul Horizontal — docs are
+        white-background) at the top of a Doc. Same public-URL
+        insertInlineImage mechanics as append_signature; a failure never
+        breaks the document — it just stays logo-less."""
+        from services import brand
+        service = get_docs_service(credentials)
+        try:
+            service.documents().batchUpdate(
+                documentId=document_id,
+                body={'requests': [{'insertInlineImage': {
+                    'location': {'index': 1},
+                    'uri': brand.logo_for_background('white'),
+                    'objectSize': {'height': {'magnitude': 40, 'unit': 'PT'}},
+                }}]}).execute()
+            return True
+        except Exception as e:
+            print(f"[docs] logo header insert failed ({e}) — document stays logo-less", flush=True)
+            return False
+
+    @staticmethod
     def append_text(document_id: str, text: str, credentials=None) -> bool:
         service = get_docs_service(credentials)
         doc = service.documents().get(documentId=document_id).execute()
