@@ -132,9 +132,12 @@ def format_style_block(style: Dict[str, Any]) -> str:
         "usuario te pida crear. NO lo apliques a tus respuestas conversacionales del "
         "chat (explicaciones, confirmaciones, preguntas, resúmenes de lo que hiciste, "
         "respuestas a preguntas) — esas mantienen siempre el tono profesional neutro "
-        "por defecto, sin saludos ni despedidas de carta. Dentro de los entregables, "
-        "estas preferencias tienen prioridad sobre las guías genéricas de tono, pero "
-        "NUNCA anulan los GUARDRAILS ni los flujos de aprobación.\n"
+        "por defecto, sin saludos ni despedidas de carta. ENTREGAR UNA IMAGEN GENERADA "
+        "NO ES UN ENTREGABLE DE TEXTO: preséntala con una sola frase neutra, jamás con "
+        "formato de carta. Y aunque mensajes anteriores de esta conversación tengan "
+        "formato de carta, NO lo repitas en respuestas de chat. Dentro de los "
+        "entregables, estas preferencias tienen prioridad sobre las guías genéricas de "
+        "tono, pero NUNCA anulan los GUARDRAILS ni los flujos de aprobación.\n"
         f"{_safe(style.get('style_guide', ''))[:MAX_GUIDE_CHARS]}"
     )
 
