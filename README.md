@@ -26,9 +26,11 @@ Deployed on Google Cloud Run in the `keraltysandbox` GCP project (`us-central1`)
   reply language deterministically.
 - **Writes in each executive's personal style — and signs with their signature** — predefined
   styles plus custom ones distilled from the executive's own sample documents (reviewed and
-  approved by them before use), selectable per conversation from the chat composer. Per-user
-  signatures (with logo) are managed in the admin panel and appended server-side to emails and
-  signed documents — no more `[Tu Nombre/Cargo]` placeholders.
+  approved by them before use), selectable per conversation from the chat composer. The style
+  applies **only to deliverables** (emails, documents, memos, communications) — conversational
+  chat replies and image delivery stay neutral. Per-user signatures (with logo) are managed in
+  the admin panel and appended server-side to emails and signed documents — no more
+  `[Tu Nombre/Cargo]` placeholders.
 - **Designs real presentations, on brand** — every deck starts from one of the three official
   corporate templates (Keralty, Presidencia Corporativo, Presidencia Estándar — the agent
   picks from the request wording, an explicit mention wins), re-themed with the brand manual's
@@ -41,11 +43,12 @@ Deployed on Google Cloud Run in the `keraltysandbox` GCP project (`us-central1`)
   67-page Manual Keralty (Pantone palette, logo usage, typography, tone) into the slides
   engine, generated Docs (on-request logo header), image art direction, and the email digest.
 - **Lets each executive choose the AI model per conversation** — a picker in the chat
-  composer (like ChatGPT/claude.ai) offers Gemini (default), Claude (Fable, Opus, Sonnet,
-  Haiku) and OpenAI (Sol, Terra, Luna, GPT 5.5); switching mid-conversation keeps the full
-  history, and models only appear when their API key is configured (keys held in Secret
-  Manager). Web search stays on Gemini (its grounding tool is Gemini-exclusive); when an
-  OpenAI model is selected, image generation uses OpenAI's images API instead of Imagen.
+  composer (like ChatGPT/claude.ai, showing the active model's name) offers Gemini (default),
+  Claude (Fable, Opus, Sonnet, Haiku) and OpenAI (Sol, Terra, Luna, GPT 5.5); switching
+  mid-conversation keeps the full history, and models only appear when their API key is
+  configured (keys held in Secret Manager). Web search stays on Gemini (its grounding tool is
+  Gemini-exclusive); image generation uses OpenAI's images API on OpenAI conversations and
+  Gemini's native image models everywhere else.
 - **Reads and writes Google Workspace** — creates and edits Docs, Sheets (including uploaded
   `.xlsx`/`.xls` files, not just native Google Sheets — and full tab management: add, rename,
   delete with approval), and Slides, always behind an explicit approval step before anything
@@ -79,8 +82,14 @@ Deployed on Google Cloud Run in the `keraltysandbox` GCP project (`us-central1`)
 - **Voice input, and spoken replies on demand** — speak a request via the Gemini Live API, and
   click any reply to hear it read aloud with Gemini's own multilingual text-to-speech (not the
   browser's built-in voices, which are inconsistent and often mispronounce Spanish).
-- **Generates images** — Imagen (or OpenAI images when an OpenAI chat model is selected),
-  art-directed with the brand palette, downloadable directly from the chat.
+- **Generates images** — Gemini's native image models ("Nano Banana", with correct in-image
+  text rendering for infographics and diagrams; Imagen as fallback, OpenAI images on OpenAI
+  conversations), art-directed with the brand palette, downloadable directly from the chat.
+- **Skills: pluggable design expertise** — developer-provided SKILL.md packages
+  (`backend/skills/`, with reference files) inject professional prompting craft into the
+  agents: per-provider image skills today (gpt-image-2 craft for OpenAI conversations, Nano
+  Banana craft for Gemini/Claude), presentation and document skills pluggable next with no
+  mechanism changes.
 - **Researches the web and internal documents together** — one agent that combines Google
   Search grounding with internal Drive search in a single response.
 - **Gives admins visibility** — a panel for platform metrics, user management, Knowledge Base
@@ -185,7 +194,7 @@ attachment — cannot trigger a send or write.
 | Agent orchestration | Google Agent Development Kit (ADK), Gemini rolling aliases (`gemini-flash-latest` / `gemini-pro-latest`) |
 | Backend | FastAPI, Python 3.11, Uvicorn |
 | Frontend | Next.js 15 (App Router, Turbopack), TypeScript, Tailwind CSS v4 |
-| AI models | Gemini (default; flash/pro rolling aliases), user-selectable Claude (Fable/Opus/Sonnet/Haiku) and OpenAI (Sol/Terra/Luna/GPT 5.5) via ADK LiteLLM; Gemini Live API + Imagen + text-embedding-005 (Vertex AI), Gemini TTS, OpenAI images |
+| AI models | Gemini (default; flash/pro rolling aliases), user-selectable Claude (Fable/Opus/Sonnet/Haiku) and OpenAI (Sol/Terra/Luna/GPT 5.5) via ADK LiteLLM; Gemini native image models (gemini-3.1-flash-image → 2.5, Imagen fallback), OpenAI images; Gemini Live API + text-embedding-005 (Vertex AI), Gemini TTS |
 | Retrieval | rank-bm25 (sparse) + Vertex AI embeddings (dense), Reciprocal Rank Fusion |
 | Data | Firestore (sessions, messages, tasks, KB chunks, audit log), Cloud Storage |
 | Auth | Google OAuth 2.0 (PKCE) + JWT (python-jose) |
@@ -275,6 +284,9 @@ frontend/
   app/[locale]/    Routed pages (chat, email, estilos, admin) — i18n via next-intl
   components/      Chat UI, layout (Sidebar/Navbar), document picker, approval cards
   hooks/           Shared client state (ChatSessionContext)
+
+backend/skills/    Developer-provided SKILL.md capability packages (image prompting craft
+                   per provider; see backend/skills/README.md for the format and rules)
 
 backend/scripts/   One-off ops scripts (Slides template upload + layout probe)
 
