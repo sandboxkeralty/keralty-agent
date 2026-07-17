@@ -16,6 +16,54 @@ _IMAGEN_FALLBACKS = [
 ]
 _working_model: Optional[str] = None  # cached for the process lifetime
 
+# Gemini-native image models (Nano Banana) — PRIMARY Gemini-path engine since
+# 2026-07-17. Probed live on the backend's AI Studio key: both served, and
+# unlike Imagen 3 they render in-image text correctly (the skill
+# gemini-api-image-gen documents exactly these models; an HL7 infographic on
+# Imagen 3 shipped with garbled labels). The Vertex Imagen :predict chain
+# below stays as fallback (it's ADC-based, so it also survives an API-key
+# removal).
+_NANO_BANANA_MODELS = [
+    "gemini-3.1-flash-image",
+    "gemini-2.5-flash-image",
+]
+
+
+def _generate_gemini_api_image(enriched_prompt: str):
+    """Nano Banana generation via the shared genai client.
+
+    Returns (bytes, mime_type, model) or (None, None, None) — any failure
+    falls through to the Imagen REST chain, never raises.
+    """
+    try:
+        from google.genai import types
+        from services.genai_client import get_genai_client
+
+        client = get_genai_client()
+        for m in _NANO_BANANA_MODELS:
+            try:
+                resp = client.models.generate_content(
+                    model=m,
+                    contents=enriched_prompt,
+                    config=types.GenerateContentConfig(
+                        response_modalities=["IMAGE"],
+                        image_config=types.ImageConfig(
+                            aspect_ratio=settings.IMAGEN_ASPECT_RATIO
+                        ),
+                    ),
+                )
+                for part in resp.candidates[0].content.parts:
+                    inline = getattr(part, "inline_data", None)
+                    if inline and inline.data:
+                        mime = inline.mime_type or "image/png"
+                        return inline.data, mime, m
+                print(f"[image_generate] {m}: no image part in response", flush=True)
+            except Exception as e:
+                print(f"[image_generate] {m} failed, trying next: {e}", flush=True)
+    except Exception as e:
+        print(f"[image_generate] gemini-api image path unavailable: {e}", flush=True)
+    return None, None, None
+
 
 def _enrich_prompt(subject: str, provider: str = "google") -> str:
     """Art-directs a short subject description into a full image prompt.
@@ -145,6 +193,8 @@ async def image_generate(prompt: str, tool_context: ToolContext = None) -> dict:
 
         # OpenAI-selected conversations generate with OpenAI images; any
         # failure falls through to the Imagen path below (never a dead turn).
+        image_mime = "image/png"  # OpenAI and Imagen both return PNG
+
         if provider == "openai":
             try:
                 image_bytes = _generate_openai_image(enriched)
@@ -153,6 +203,13 @@ async def image_generate(prompt: str, tool_context: ToolContext = None) -> dict:
                 traceback.print_exc()
                 print(f"[image_generate] OPENAI IMAGE FAILED: {oe} — falling back to Imagen",
                       flush=True)
+
+        # Gemini path (and any OpenAI failure): Nano Banana first — it renders
+        # in-image text correctly; Imagen 3 (REST chain below) is the fallback.
+        if image_bytes is None:
+            nb_bytes, nb_mime, nb_model = _generate_gemini_api_image(enriched)
+            if nb_bytes:
+                image_bytes, image_mime, used_model = nb_bytes, nb_mime, nb_model
 
         candidates = [settings.IMAGEN_MODEL] + [
             m for m in _IMAGEN_FALLBACKS if m != settings.IMAGEN_MODEL
@@ -207,11 +264,12 @@ async def image_generate(prompt: str, tool_context: ToolContext = None) -> dict:
         if image_bytes is None:
             raise RuntimeError(f"ALL MODELS FAILED — last error: {last_err}")
 
-        blob_name = f"images/{uuid.uuid4()}.png"
+        ext = "jpg" if image_mime == "image/jpeg" else "png"
+        blob_name = f"images/{uuid.uuid4()}.{ext}"
         client = storage.Client(project=settings.GOOGLE_CLOUD_PROJECT)
         bucket = client.bucket(settings.GCS_BUCKET)
         blob = bucket.blob(blob_name)
-        blob.upload_from_string(image_bytes, content_type="image/png")
+        blob.upload_from_string(image_bytes, content_type=image_mime)
         blob.make_public()
 
         return {

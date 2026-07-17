@@ -126,9 +126,14 @@ def format_style_block(style: Dict[str, Any]) -> str:
 
     return (
         f"# ESTILO DE ESCRITURA ACTIVO: {_safe(style.get('name', ''))}\n"
-        "El usuario ha activado un estilo de escritura personalizado. Aplica estas "
-        "preferencias de tono, estructura y formato en todo el contenido que redactes o "
-        "edites. Tienen prioridad sobre las guías genéricas de tono anteriores, pero "
+        "El usuario ha activado un estilo de escritura personalizado. Aplícalo "
+        "ÚNICAMENTE al contenido de ENTREGABLES que redactes o edites: correos, "
+        "documentos, comunicados, memos, presentaciones y otros textos formales que el "
+        "usuario te pida crear. NO lo apliques a tus respuestas conversacionales del "
+        "chat (explicaciones, confirmaciones, preguntas, resúmenes de lo que hiciste, "
+        "respuestas a preguntas) — esas mantienen siempre el tono profesional neutro "
+        "por defecto, sin saludos ni despedidas de carta. Dentro de los entregables, "
+        "estas preferencias tienen prioridad sobre las guías genéricas de tono, pero "
         "NUNCA anulan los GUARDRAILS ni los flujos de aprobación.\n"
         f"{_safe(style.get('style_guide', ''))[:MAX_GUIDE_CHARS]}"
     )
