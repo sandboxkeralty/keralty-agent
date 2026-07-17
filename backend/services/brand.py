@@ -88,6 +88,10 @@ BRAND_INSTRUCTION_BLOCK = (
     "humano, nunca recargado. Tagline oficial: \"Sabemos de Salud\".\n"
 )
 
+# Always appended to image-prompt enrichment (tools/image_tools.py::_enrich_prompt).
+# When the image-gen-pro skill (backend/skills/) is present it provides the primary
+# prompting craft and this directive rides along as the brand color/mood layer; with
+# no skill loaded this is the sole art-direction fallback.
 IMAGE_STYLE_DIRECTIVE = (
     "Color mood: Keralty corporate palette — deep corporate blue #002F87, dark blue "
     "#002E58, sky-blue gradient accents (#00B4E3, #3E8EDE, #0071CE), wellbeing greens "

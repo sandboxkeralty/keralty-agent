@@ -81,4 +81,13 @@ def make_adk_model(spec: ModelSpec) -> Union[str, object, None]:
     if spec.provider == "google":
         return None
     from google.adk.models.lite_llm import LiteLlm
-    return LiteLlm(model=f"{spec.provider}/{spec.model_id}")
+    kwargs = {}
+    if spec.provider == "openai" and spec.model_id.startswith("gpt-5.6"):
+        # OpenAI (observed live 2026-07-17): gpt-5.6 reasoning models reject
+        # function tools on /v1/chat/completions unless reasoning_effort is
+        # explicitly "none" (400 otherwise — the family reasons by default).
+        # Every agent carries at least transfer_to_agent, so without this the
+        # whole tree is unusable on these models. ADK's LiteLlm forwards extra
+        # kwargs to litellm.acompletion via _additional_args.
+        kwargs["reasoning_effort"] = "none"
+    return LiteLlm(model=f"{spec.provider}/{spec.model_id}", **kwargs)

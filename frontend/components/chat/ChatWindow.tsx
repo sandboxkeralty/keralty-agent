@@ -689,7 +689,7 @@ export function ChatWindow() {
                   <button
                     type="button"
                     onClick={() => setShowModelMenu(p => !p)}
-                    className={`p-2 rounded-full transition-colors ${selectedModel ? 'text-[var(--color-primary)] bg-[var(--color-primary-light)]' : 'text-gray-400 hover:text-[var(--color-navy)]'}`}
+                    className={`flex items-center gap-1.5 pl-2 pr-2.5 py-2 rounded-full transition-colors ${selectedModel ? 'text-[var(--color-primary)] bg-[var(--color-primary-light)]' : 'text-gray-400 hover:text-[var(--color-navy)]'}`}
                     title={
                       selectedModel
                         ? t('activeModel', { name: modelData.find(m => m.key === selectedModel)?.display_name ?? selectedModel })
@@ -697,6 +697,9 @@ export function ChatWindow() {
                     }
                   >
                     <Cpu size={16} />
+                    <span className="text-xs font-medium max-w-[110px] truncate">
+                      {(modelData.find(m => m.key === selectedModel) ?? modelData.find(m => m.key === 'gemini') ?? modelData[0])?.display_name}
+                    </span>
                   </button>
                 )}
                 <VoiceChat onTranscript={handleTranscript} />

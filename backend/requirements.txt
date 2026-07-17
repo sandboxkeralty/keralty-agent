@@ -41,3 +41,6 @@ openpyxl==3.1.5
 Pillow==11.3.0
 # Executive news page: tolerant RSS parsing (Vocento feeds break strict ET)
 feedparser==6.0.11
+# Skill packages (backend/skills/*/SKILL.md) frontmatter parsing — version
+# matches the transitive pin already present in the image
+pyyaml==6.0.3

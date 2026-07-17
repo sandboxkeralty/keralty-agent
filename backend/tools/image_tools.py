@@ -17,7 +17,7 @@ _IMAGEN_FALLBACKS = [
 _working_model: Optional[str] = None  # cached for the process lifetime
 
 
-def _enrich_prompt(subject: str) -> str:
+def _enrich_prompt(subject: str, provider: str = "google") -> str:
     """Art-directs a short subject description into a full image prompt.
 
     Adds composition, lighting, color mood and professional-style directives —
@@ -27,20 +27,43 @@ def _enrich_prompt(subject: str) -> str:
     try:
         from google.genai import types
         from services.genai_client import get_genai_client
+        from services import skill_registry
+
+        skill_guidance = skill_registry.full_guidance_for_tool("image_generate", provider)
+        source = "skill" if skill_guidance else "brand-fallback"
+        print(f"[image_generate] art direction source: {source} (provider={provider})",
+              flush=True)
+        # Brand color mood always rides along; the skill (when present) adds
+        # the per-use-case prompting craft on top of it.
+        guidance = (
+            f"{skill_guidance}\n\n{brand.IMAGE_STYLE_DIRECTIVE}"
+            if skill_guidance
+            else brand.IMAGE_STYLE_DIRECTIVE
+        )
 
         client = get_genai_client()
         response = client.models.generate_content(
             model=settings.GEMINI_FLASH_MODEL,
             contents=(
                 "Rewrite the following subject as ONE single English image-generation "
-                "prompt for premium corporate healthcare imagery. Include: the subject, "
-                "a concrete composition (camera angle or framing), lighting (soft, "
-                "natural or studio), the brand color mood and photography premises "
-                "below, and a style (professional editorial photography OR clean "
-                "modern flat illustration — pick whichever suits the subject). "
-                f"{brand.IMAGE_STYLE_DIRECTIVE} "
-                "End the prompt with: 'no text, no logos, no watermarks, no "
-                "identifiable faces'. Output ONLY the prompt, nothing else.\n\n"
+                "prompt for premium corporate healthcare imagery. Classify the use "
+                "case (photo, infographic/diagram, logo, ad, mockup, illustration) "
+                "and apply the matching guidance below: concrete composition (camera "
+                "angle or framing), lighting, and style. This platform only GENERATES "
+                "images (no editing) and accepts no API parameters — ignore any "
+                "size/quality/n/input_fidelity recommendations and output ONLY the "
+                "prompt text.\n\n"
+                f"{guidance}\n\n"
+                "The image backend renders ADULTS ONLY (its safety filter rejects "
+                "any image containing minors): never mention children, kids, "
+                "babies or minors in the prompt — for family subjects, describe "
+                "adult family members or a composition without minors. "
+                "Unless the subject is an infographic or diagram that explicitly "
+                "needs labeled text, end the prompt with: 'adults only, no "
+                "children, no text, no logos, no watermarks, no identifiable "
+                "faces' (for infographics/diagrams use: 'no watermarks, no logos, "
+                "no identifiable faces' and keep the requested labels). Output "
+                "ONLY the prompt, nothing else.\n\n"
                 f"Subject: {subject}"
             ),
             config=types.GenerateContentConfig(
@@ -107,15 +130,22 @@ async def image_generate(prompt: str, tool_context: ToolContext = None) -> dict:
         adc, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
         session = AuthorizedSession(adc)
 
-        enriched = _enrich_prompt(prompt)
+        # Provider decides both the generation path below AND which image
+        # skill guides the enrichment (image-gen-pro is OpenAI-scoped,
+        # gemini-api-image-gen covers the Gemini/Imagen path).
+        state = getattr(tool_context, "state", {}) if tool_context else {}
+        provider = state.get("model_provider") or "google"
+        if provider == "openai" and not settings.OPENAI_API_KEY:
+            provider = "google"
+
+        enriched = _enrich_prompt(prompt, provider)
 
         image_bytes = None
         used_model = None
 
         # OpenAI-selected conversations generate with OpenAI images; any
         # failure falls through to the Imagen path below (never a dead turn).
-        state = getattr(tool_context, "state", {}) if tool_context else {}
-        if state.get("model_provider") == "openai" and settings.OPENAI_API_KEY:
+        if provider == "openai":
             try:
                 image_bytes = _generate_openai_image(enriched)
                 used_model = settings.OPENAI_IMAGE_MODEL
@@ -136,22 +166,37 @@ async def image_generate(prompt: str, tool_context: ToolContext = None) -> dict:
                 f"projects/{settings.GOOGLE_CLOUD_PROJECT}/locations/{settings.GOOGLE_CLOUD_REGION}"
                 f"/publishers/google/models")
         for m in candidates if image_bytes is None else []:
-            resp = session.post(
-                f"{base}/{m}:predict",
-                json={"instances": [{"prompt": enriched}],
-                      "parameters": {"sampleCount": 1,
-                                     "aspectRatio": settings.IMAGEN_ASPECT_RATIO}},
-                timeout=120,
-            )
-            if resp.status_code == 200:
+            # Imagen's RAI filter is nondeterministic on people subjects —
+            # observed live: the same prompt alternates between an image and an
+            # empty/filtered prediction. One retry per model recovers most of
+            # these instead of falling through to the (dead, 404) fallbacks.
+            for attempt in (1, 2):
+                resp = session.post(
+                    f"{base}/{m}:predict",
+                    json={"instances": [{"prompt": enriched}],
+                          "parameters": {"sampleCount": 1,
+                                         "aspectRatio": settings.IMAGEN_ASPECT_RATIO,
+                                         "includeRaiReason": True}},
+                    timeout=120,
+                )
+                if resp.status_code != 200:
+                    break
                 preds = resp.json().get("predictions") or []
-                if not preds:
-                    last_err = "empty predictions (possibly safety-filtered)"
-                    continue
-                image_bytes = base64.b64decode(preds[0]["bytesBase64Encoded"])
-                used_model = m
-                _working_model = m
+                img_b64 = preds[0].get("bytesBase64Encoded") if preds else None
+                if img_b64:
+                    image_bytes = base64.b64decode(img_b64)
+                    used_model = m
+                    _working_model = m
+                    break
+                reason = (preds[0].get("raiFilteredReason") if preds else None) \
+                    or "no predictions returned"
+                last_err = f"safety-filtered/empty ({reason})"
+                print(f"[image_generate] model {m} attempt {attempt}: {last_err}",
+                      flush=True)
+            if image_bytes is not None:
                 break
+            if resp.status_code == 200:
+                continue  # filtered twice — try next model
             last_err = f"HTTP {resp.status_code}: {resp.text[:160]}"
             if resp.status_code in (403, 404):
                 print(f"[image_generate] model {m} unavailable, trying next: {last_err}",

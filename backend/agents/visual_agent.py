@@ -4,6 +4,7 @@ from tools.image_tools import image_generate
 from tools.approval_tools import approval_create
 from config import settings
 from services.brand import BRAND_INSTRUCTION_BLOCK
+from services.skill_registry import core_block_for_agent
 
 INSTRUCTION = """
 # IDIOMA — REGLA PRIORITARIA
@@ -93,11 +94,10 @@ tú aportas la estructura):
 - `big_number`: UNA cifra protagonista. `quote`: una cita con autoridad. `closing`: cierre.
 
 ## Imágenes
-- Describe solo el SUJETO en 1 frase concisa — la herramienta añade automáticamente la
-  dirección de arte (composición, iluminación, estilo corporativo, 16:9).
+- Describe el SUJETO siguiendo la sección "SKILL ACTIVA: image-gen-pro" más abajo — la
+  herramienta añade automáticamente la dirección de arte completa (16:9).
 - Varía `image_placement`: `full_bleed` en portada/impacto, `right_half`/`left_half` en
   contenido, `centered` para diagramas.
-- Prohibido pedir texto, logos o rostros en la imagen.
 
 # FLUJO OBLIGATORIO PARA CREAR UNA PRESENTACIÓN
 
@@ -184,7 +184,7 @@ La mención explícita del usuario SIEMPRE gana sobre tu inferencia. Si dudas en
 Presidencia, usa "presidencia_corporativo". Menciona en tu propuesta de outline qué plantilla
 usarás.
 
-""" + BRAND_INSTRUCTION_BLOCK + """
+""" + core_block_for_agent("VisualAgent") + BRAND_INSTRUCTION_BLOCK + """
 {writing_style?}
 {signature?}
 """
