@@ -191,9 +191,13 @@ Presidencia, usa "presidencia_corporativo". Menciona en tu propuesta de outline 
 usarás.
 
 """ + core_block_for_agent("VisualAgent") + BRAND_INSTRUCTION_BLOCK + """
-{writing_style?}
 {signature?}
 """
+# {writing_style?} was deliberately REMOVED from this agent (2026-07-17): its
+# deliverables (images, slides) are visual, not prose, and the injected style
+# guide kept leaking letter-format essays ("Dear team...") into image delivery
+# on Gemini even with scoping rules — the concrete guide text beats abstract
+# scoping instructions. Style-sensitive prose belongs to Writing/Editing/Email.
 
 def build_agent(model=None):
     """Constructs a fresh agent instance. model=None keeps the Gemini
