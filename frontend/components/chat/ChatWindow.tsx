@@ -131,9 +131,7 @@ export function ChatWindow() {
     const el = inputRef.current;
     if (!el) return;
     el.style.height = 'auto';
-    // +2 compensates the border under border-box sizing, so scrollHeight
-    // fitting exactly doesn't leave a phantom 2px internal scroll.
-    el.style.height = `${Math.min(el.scrollHeight + 2, 200)}px`;
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, [input]);
 
   // Close the attach menu / Drive picker on an outside click, and on Escape —
@@ -674,12 +672,12 @@ export function ChatWindow() {
         )}
         <div ref={attachAreaRef}>
           <div className="relative flex items-end gap-2">
-            <div className="relative flex-1 flex items-end">
+            <div className="flex-1 flex items-end rounded-[24px] border border-[var(--color-border)] bg-white focus-within:ring-2 focus-within:ring-[var(--color-primary)]/30">
               <button
                 type="button"
                 onClick={() => setShowAttachMenu(p => !p)}
                 disabled={uploading}
-                className="absolute left-3 bottom-[11px] p-1 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] transition-colors z-10 disabled:opacity-50"
+                className="shrink-0 ml-3 mb-[11px] p-1 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] transition-colors disabled:opacity-50"
                 title={t('attachDocument')}
               >
                 {uploading ? <Loader2 size={16} className="animate-spin" /> : <Paperclip size={16} />}
@@ -694,7 +692,7 @@ export function ChatWindow() {
               <textarea
                 ref={inputRef}
                 rows={1}
-                className="w-full pl-10 pr-20 py-3 rounded-[24px] border border-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 text-sm resize-none overflow-y-auto max-h-[200px] leading-5"
+                className="flex-1 min-w-0 px-2 py-3 bg-transparent focus:outline-none text-sm resize-none overflow-y-auto max-h-[200px] leading-5"
                 placeholder={t('placeholder')}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
@@ -706,7 +704,7 @@ export function ChatWindow() {
                 }}
                 disabled={loading}
               />
-              <div className="absolute right-2 bottom-[7px] flex items-center gap-1">
+              <div className="shrink-0 flex items-center gap-1 mr-2 mb-[7px]">
                 {styleData && (
                   <button
                     type="button"
