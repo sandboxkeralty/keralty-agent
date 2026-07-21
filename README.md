@@ -17,13 +17,15 @@ Deployed on Google Cloud Run in the `keraltysandbox` GCP project (`us-central1`)
 
 - **Chats like Claude.ai / ChatGPT** — a persistent sidebar with grouped conversation history
   (Hoy / Ayer / Últimos 7 días), **chat folders** (create/rename/delete, move chats, start a
-  conversation inside a folder — ChatGPT-Projects style), instant switching between
-  conversations, a working "new conversation" that actually resets state, and **bulk delete**
-  with real purge (messages and model memory are actually removed; the write-audit trail never
-  is). Conversation memory survives restarts, redeploys and scale-out (ADK events persist to
-  Firestore), and a live status label shows what the assistant is doing ("Consultando la base
-  de conocimiento…") instead of a blinking cursor. The site language toggle (ES/EN) drives the
-  reply language deterministically.
+  conversation inside a folder — ChatGPT-Projects style), **inline conversation rename**,
+  instant switching between conversations, a working "new conversation" that actually resets
+  state, and **bulk delete** with real purge (messages and model memory are actually removed;
+  the write-audit trail never is). The composer auto-grows with the text (then scrolls
+  internally; Shift+Enter for newlines) and a **stop button** halts a streaming reply
+  mid-generation, keeping what already streamed. Conversation memory survives restarts,
+  redeploys and scale-out (ADK events persist to Firestore), and a live status label shows
+  what the assistant is doing ("Consultando la base de conocimiento…") instead of a blinking
+  cursor. The site language toggle (ES/EN) drives the reply language deterministically.
 - **Writes in each executive's personal style — and signs with their signature** — predefined
   styles plus custom ones distilled from the executive's own sample documents (reviewed and
   approved by them before use), selectable per conversation from the chat composer. The style
@@ -49,7 +51,8 @@ Deployed on Google Cloud Run in the `keraltysandbox` GCP project (`us-central1`)
   configured (keys held in Secret Manager). Web search stays on Gemini (its grounding tool is
   Gemini-exclusive); image generation uses OpenAI's images API on OpenAI conversations and
   Gemini's native image models everywhere else.
-- **Reads and writes Google Workspace** — creates and edits Docs, Sheets (including uploaded
+- **Reads and writes Google Workspace** — generated Docs render with real headings, bold,
+  links and bullet/numbered lists (never literal Markdown syntax); creates and edits Docs, Sheets (including uploaded
   `.xlsx`/`.xls` files, not just native Google Sheets — and full tab management: add, rename,
   delete with approval), and Slides, always behind an explicit approval step before anything
   destructive is written. Chat attachments (up to 5, from Drive or the device — **including

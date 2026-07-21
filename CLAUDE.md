@@ -184,6 +184,23 @@ Required Cloud Run env vars: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE
 
 `services/drive.py`'s `list_documents` accepts a `mime_types` param (aliased via `_MIME_TYPE_ALIASES`, e.g. `"spreadsheet"` → both the native Google Sheets mimeType and both Excel mimeTypes) and defaults (`_DEFAULT_MIME_TYPES`) to Docs/Slides/Sheets/Excel **plus PDF, Word (`.docx`/`.doc`), plain text, CSV, and Markdown** — so both `drive_search` and the chat Drive picker (`GET /documents`) find real-world uploaded files, not just native Office formats. The mimeType clause is parenthesized in the built query (`(mimeType='X' or mimeType='Y') and name contains '...'`) — without the parens, operator precedence silently broadens the query whenever a name filter is combined with 2+ mimeTypes.
 
+### Google Docs write operations (Markdown → native formatting, July 2026)
+
+The agents draft in Markdown by design (WritingAgent's instruction mandates it), but
+`DocsService.append_text` used to insert it verbatim — generated Docs showed literal
+`##`/`**` syntax. `services/docs.py::markdown_to_docs_requests(md, start)` now renders it
+natively: strips the syntax while recording ranges, inserts the clean text in ONE
+`insertText`, then applies style requests against final coordinates (safe because none of
+them shift indexes — no leading tabs). Covers `#`–`######` → `HEADING_1..6`, `**bold**`,
+`*italic*`, `[links](url)`, `` `code` `` (Courier New), `*`/`-`/`1.` lines → real
+bullet/numbered lists, `---` dropped. **Contiguous list lines must share ONE
+`createParagraphBullets` range** — per-paragraph requests restart numbered lists at 1 on
+every line. If the API rejects any style request, `append_text` falls back to plain-text
+insertion so content is never lost (log line: `markdown render failed`). Both `docs_create`
+and `docs_update` route through `append_text`, so both render. Verified live against a real
+Doc (structure inspected via the API: genuine headings/bullets/partial bold, zero literal
+markdown).
+
 ### HITL (Human-in-the-Loop) approval flow
 
 EditingAgent, VisualAgent, and EmailAgent all use a conversational HITL pattern:
@@ -389,6 +406,10 @@ carries it from the sidebar's per-folder "+" button). Folder deletion offers bot
 `routers/history.py`:
 - `GET /history/` — all sessions for the authenticated user, with `folder_id`, message count and 120-char preview
 - `GET /history/{session_id}` — full message thread (ownership-checked)
+- `PATCH /history/{session_id}/title` — rename a conversation (ownership-checked, trimmed,
+  capped at 100 chars, 422 on empty). Sidebar: pencil icon on row hover, inline input (same
+  pattern as folder rename, but rendered as a sibling replacing the row `<button>` — an input
+  nested inside a button is invalid HTML and eats key events)
 - `PATCH /history/{session_id}/folder` — move a chat between folders (both ownerships checked)
 - `DELETE /history/{session_id}` — **full purge** (July 2026, user-approved change): session
   doc + ALL its `messages` docs (`FirestoreService.purge_session_data`, batched) + the ADK
@@ -480,6 +501,19 @@ Getting the text into the message wasn't sufficient on its own — see the stick
 `routers/chat.py` streams ADK events as `text/event-stream`. ADK `Part` objects always have a `.text` attribute (Pydantic field defaulting to `None`), so the guard must be `if p.text is not None:` — **not** `if hasattr(p, "text"):`. The same hasattr-vs-value trap applies one level up: `event.content.parts` can itself be `None` (seen in production on transfer/tool-only events — iterating it threw `TypeError: 'NoneType' object is not iterable` and killed the whole stream), so that guard must be `getattr(event.content, "parts", None)`.
 
 **Live agent-status label** (the "Consultando la base de conocimiento…" line shown while the assistant works, instead of a bare blinking cursor): `routers/chat.py` reads `event.author` (agent name) and `event.get_function_calls()[0].name` (tool) off every ADK event and streams them as `{'type': 'status', 'agent': ..., 'tool': ...}` SSE events — deduped on the `(agent, tool)` pair so a multi-part turn doesn't spam identical events, and `author == "user"` events are skipped. `ChatWindow.tsx` holds the latest pair in `agentStatus` state (a single state, not per-message — only one reply streams at a time; reset on submit and in the `finally`) and resolves it to a localized label via `statusLabel()`: **tool mapping wins over agent mapping** (more specific), `transfer_to_agent` is deliberately ignored as a tool (falls through to the agent label), and anything unrecognized falls back to the pre-existing `chat.agentThinking` key. The 16 `chat.status*` keys (plus `chat.errorRateLimited`) live in both `frontend/messages/{es,en}.json`. Tool matching is prefix-based (`kb_`, `drive_`, `docs_`, `sheets_`/`spreadsheet`, `slides_`, `email_`) — a new tool following the existing naming conventions gets a sensible label for free; a new *agent* needs a `case` added in `statusLabel()` plus message keys, or it degrades gracefully to "thinking". The label row renders only while `isStreaming && !content`; once real text starts streaming it's replaced by the original cursor. Verified against the live deployment: a KB question streams `OrchestratorAgent` → `KnowledgeAgent`+`kb_search` → content.
+
+**Composer + stop button (July 2026).** The chat input is an auto-growing `<textarea>`
+(`inputRef`, height driven by a `useEffect` on the input value so programmatic sets — voice
+transcript, post-send clear — resize too; max 200px then internal scroll; Enter sends,
+Shift+Enter newline, IME composition guarded via `e.nativeEvent.isComposing`). The pill is a
+**flex container** (border + `focus-within` ring on the wrapper; paperclip / textarea / icon
+cluster as flex siblings) — the icons were previously absolutely overlaid on the textarea with
+only `pr-20` reserved, so long text ran underneath the style/model/mic/send cluster. While a
+reply streams, the send button becomes a stop button: an `AbortController` signal on the
+`/api/chat` fetch cancels both the request and the SSE reader; the catch branch keeps partial
+streamed text (drops the bubble if empty) and shows no error — the client disconnect also
+cancels the backend SSE generator, so the turn stops server-side and unstreamed output isn't
+persisted.
 
 Chat messages are rendered as Markdown in the frontend using `react-markdown` + `remark-gfm`, so agent responses with links, tables, headings and lists display correctly. `ChatWindow.tsx` passes a custom `a` renderer (`MarkdownLink`, alongside the existing `img: MarkdownImage`) so every link in an agent response — the Docs/Sheets/Slides URLs `docs_create`/`create_spreadsheet`/`slides_create` return, in particular — opens with `target="_blank" rel="noopener noreferrer"` instead of navigating the user away from the app in the same tab.
 
