@@ -56,6 +56,9 @@ export function Sidebar() {
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  // Session rename UI state
+  const [renamingSessionId, setRenamingSessionId] = useState<string | null>(null);
+  const [sessionTitle, setSessionTitle] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [moveMenuFor, setMoveMenuFor] = useState<string | null>(null);
   const [confirmClearAll, setConfirmClearAll] = useState(false);
@@ -196,6 +199,22 @@ export function Sidebar() {
     }
   };
 
+  const handleRenameSession = async (sid: string) => {
+    const title = sessionTitle.trim();
+    setRenamingSessionId(null);
+    if (!title) return;
+    try {
+      await apiJson(`/history/${sid}/title`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      setSessions(prev => prev.map(s => s.session_id === sid ? { ...s, title } : s));
+    } catch (e) {
+      if (!(e instanceof UnauthorizedError)) console.error(e);
+    }
+  };
+
   const handleClearAll = async () => {
     setConfirmClearAll(false);
     setBusy(true);
@@ -219,6 +238,20 @@ export function Sidebar() {
 
   const sessionRow = (s: SessionSummary) => (
     <div key={s.session_id} className="relative">
+      {renamingSessionId === s.session_id ? (
+        <div className="flex items-center gap-1.5 rounded-[8px] px-3 py-1.5">
+          <MessageSquare className="h-3.5 w-3.5 shrink-0 opacity-60" />
+          <input
+            autoFocus
+            value={sessionTitle}
+            onChange={e => setSessionTitle(e.target.value)}
+            onKeyDown={e => { if (e.key === "Enter") handleRenameSession(s.session_id); if (e.key === "Escape") setRenamingSessionId(null); }}
+            onBlur={() => handleRenameSession(s.session_id)}
+            maxLength={100}
+            className="flex-1 min-w-0 rounded-[6px] bg-white/10 border border-white/20 px-1.5 py-0.5 text-xs text-white outline-none focus:border-[var(--color-primary)]"
+          />
+        </div>
+      ) : (
       <button
         onClick={() => handleSelectSession(s)}
         className={`group w-full flex items-center gap-2 rounded-[8px] px-3 py-2 text-sm text-left transition-colors ${
@@ -233,6 +266,14 @@ export function Sidebar() {
           <Loader2 className="h-3 w-3 animate-spin shrink-0" />
         ) : (
           <span className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+            <span
+              role="button"
+              onClick={(e) => { e.stopPropagation(); setRenamingSessionId(s.session_id); setSessionTitle(s.title || ""); }}
+              className="hover:text-[var(--color-primary)]"
+              title={t("renameConversation")}
+            >
+              <Pencil className="h-3 w-3" />
+            </span>
             <span
               role="button"
               onClick={(e) => { e.stopPropagation(); setMoveMenuFor(moveMenuFor === s.session_id ? null : s.session_id); }}
@@ -252,6 +293,7 @@ export function Sidebar() {
           </span>
         )}
       </button>
+      )}
       {moveMenuFor === s.session_id && (
         <div className="absolute right-2 top-8 z-50 w-44 rounded-[8px] bg-[var(--color-navy-dark)] border border-white/10 shadow-xl py-1 text-xs">
           <button

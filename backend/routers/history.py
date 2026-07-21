@@ -93,6 +93,23 @@ async def move_session(session_id: str, request: Request, body: SessionFolder):
     return {"session_id": session_id, "folder_id": body.folder_id}
 
 
+class SessionTitle(BaseModel):
+    title: str
+
+
+@router.patch("/{session_id}/title")
+async def rename_session(session_id: str, request: Request, body: SessionTitle):
+    user_id = _user_id(request)
+    session = FirestoreService.get_session(session_id)
+    if not session or session.user_id != user_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    title = body.title.strip()[:100]
+    if not title:
+        raise HTTPException(status_code=422, detail="Title cannot be empty")
+    FirestoreService.set_session_title(session_id, title)
+    return {"session_id": session_id, "title": title}
+
+
 @router.get("/{session_id}")
 def get_session(session_id: str, request: Request):
     user_id = _user_id(request)

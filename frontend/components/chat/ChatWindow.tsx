@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import type { AnchorHTMLAttributes, ImgHTMLAttributes } from 'react';
-import { Send, Bot, User, Paperclip, X, Download, Volume2, Loader2, Cloud, HardDrive, PenLine, Check, Cpu, Image as ImageIcon, UploadCloud } from 'lucide-react';
+import { Send, Bot, User, Paperclip, X, Download, Volume2, Loader2, Cloud, HardDrive, PenLine, Check, Cpu, Image as ImageIcon, UploadCloud, Square } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { SourceChip } from './SourceChip';
@@ -118,9 +118,23 @@ export function ChatWindow() {
   const bottomRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const attachAreaRef = useRef<HTMLDivElement>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const audioUrlRef = useRef<string | null>(null);
+
+  // Auto-grow the composer textarea with its content, up to a max height —
+  // beyond that it scrolls internally (ChatGPT/Claude behavior). Driven by the
+  // input value so programmatic sets (voice transcript, post-send clear) resize too.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    // +2 compensates the border under border-box sizing, so scrollHeight
+    // fitting exactly doesn't leave a phantom 2px internal scroll.
+    el.style.height = `${Math.min(el.scrollHeight + 2, 200)}px`;
+  }, [input]);
 
   // Close the attach menu / Drive picker on an outside click, and on Escape —
   // previously the only way to dismiss the Drive picker once open was to
@@ -397,6 +411,8 @@ export function ChatWindow() {
     ));
 
     let sawError = false;
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const token = getToken();
       if (!token) throw new UnauthorizedError();
@@ -404,6 +420,7 @@ export function ChatWindow() {
       // 401 handling is replicated so an expired token drops to the login gate.
       const response = await fetch(`${API_URL}/api/chat`, {
         method: 'POST',
+        signal: controller.signal,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
@@ -497,13 +514,25 @@ export function ChatWindow() {
         window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
         return;
       }
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        // User pressed stop: keep whatever streamed; drop the bubble if empty.
+        setMessages(prev => prev
+          .map(m => m.id === assistantId ? { ...m, isStreaming: false } : m)
+          .filter(m => m.id !== assistantId || m.content.length > 0));
+        setAttachedDocs([]);
+        bumpHistoryRefresh();
+        return;
+      }
       console.error(err);
       failWith(t('errorGeneric'));
     } finally {
+      abortRef.current = null;
       setLoading(false);
       setAgentStatus(null);
     }
   };
+
+  const handleStop = () => abortRef.current?.abort();
 
   // Maps the streamed (agent, tool) status to a human-friendly localized label.
   // Tool wins over agent (it's more specific); unknown pairs fall back to the
@@ -644,13 +673,13 @@ export function ChatWindow() {
           <div className="mb-2 px-1 text-xs text-red-500">{uploadError}</div>
         )}
         <div ref={attachAreaRef}>
-          <div className="relative flex items-center gap-2">
-            <div className="relative flex-1 flex items-center">
+          <div className="relative flex items-end gap-2">
+            <div className="relative flex-1 flex items-end">
               <button
                 type="button"
                 onClick={() => setShowAttachMenu(p => !p)}
                 disabled={uploading}
-                className="absolute left-3 p-1 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] transition-colors z-10 disabled:opacity-50"
+                className="absolute left-3 bottom-[11px] p-1 text-[var(--color-text-muted)] hover:text-[var(--color-primary)] transition-colors z-10 disabled:opacity-50"
                 title={t('attachDocument')}
               >
                 {uploading ? <Loader2 size={16} className="animate-spin" /> : <Paperclip size={16} />}
@@ -662,15 +691,22 @@ export function ChatWindow() {
                 onChange={handleLocalUpload}
                 className="hidden"
               />
-              <input
-                type="text"
-                className="w-full pl-10 pr-20 py-3 rounded-full border border-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 text-sm"
+              <textarea
+                ref={inputRef}
+                rows={1}
+                className="w-full pl-10 pr-20 py-3 rounded-[24px] border border-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30 text-sm resize-none overflow-y-auto max-h-[200px] leading-5"
                 placeholder={t('placeholder')}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    if (input.trim() && !loading) formRef.current?.requestSubmit();
+                  }
+                }}
                 disabled={loading}
               />
-              <div className="absolute right-2 flex items-center gap-1">
+              <div className="absolute right-2 bottom-[7px] flex items-center gap-1">
                 {styleData && (
                   <button
                     type="button"
@@ -703,13 +739,24 @@ export function ChatWindow() {
                   </button>
                 )}
                 <VoiceChat onTranscript={handleTranscript} />
-                <button
-                  type="submit"
-                  disabled={!input.trim() || loading}
-                  className="p-2 rounded-full bg-[var(--color-primary)] text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--color-primary-dark)] transition-colors"
-                >
-                  <Send size={16} />
-                </button>
+                {loading ? (
+                  <button
+                    type="button"
+                    onClick={handleStop}
+                    className="p-2 rounded-full bg-[var(--color-navy)] text-white hover:bg-[var(--color-navy-dark)] transition-colors"
+                    title={t('stopGenerating')}
+                  >
+                    <Square size={16} fill="currentColor" />
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={!input.trim()}
+                    className="p-2 rounded-full bg-[var(--color-primary)] text-white disabled:opacity-50 disabled:cursor-not-allowed hover:bg-[var(--color-primary-dark)] transition-colors"
+                  >
+                    <Send size={16} />
+                  </button>
+                )}
               </div>
             </div>
           </div>

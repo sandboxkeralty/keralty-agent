@@ -54,6 +54,10 @@ class FirestoreService:
         db.collection("sessions").document(session_id).update({"folder_id": folder_id})
 
     @staticmethod
+    def set_session_title(session_id: str, title: str):
+        db.collection("sessions").document(session_id).update({"title": title})
+
+    @staticmethod
     def purge_session_data(session_id: str) -> int:
         """Deletes the session doc and ALL its messages (real purge, batched).
 
